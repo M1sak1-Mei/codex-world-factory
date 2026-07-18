@@ -86,7 +86,10 @@ Useful URL parameters: `?seed=N` (world seed), `?terrain=laas|folded-ranges|rift
 | `STATUS.md` | The model's working memory: current state, diagnosis logs, measurements, decision history. |
 | `docs/THREE-NOTES.md` | Verified three.js/TSL/WebGPU API notes the model accumulated against the pinned version. |
 | `docs/WORLD-FEATURE-LIBRARIES.md` | World-feature contracts and the library authoring checklist. |
+| `docs/WORLD-GENERATOR-RUNTIME.md` | URL-to-scene runtime pipeline and generator/model separation. |
 | `docs/DELTA.md`, `docs/DEVIATIONS.md` | Reference-comparison loops per phase, and spec deviations with reasons. |
+| `src/generation/models/` | Reusable procedural geometry, materials, model catalogues, and typed model kits. |
+| `src/generation/libraries/` | Scene recipes, terrain planners, pure placement grammars, and runtime orchestration. |
 | `src/` | Engine and world: `core/`, `generation/`, `gpu/`, `world/`, `vegetation/`, `render/`, `sky/`, `debug/`. |
 | `tools/` | The model's verification harness: headless WebGPU screenshots, image comparison, pixel sampling, GPU profiling, bug-specific probes. |
 | `reference/` | The reference frames the world is judged against. |

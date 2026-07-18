@@ -4,7 +4,15 @@ import { WorldSeed } from '../src/core/Seed';
 import { createDefaultWorldFeatureRegistry } from '../src/generation/DefaultWorldFeatures';
 import type { TerrainSurface } from '../src/generation/core/WorldFeature';
 import { parseWorldRecipeId } from '../src/generation/core/WorldRecipe';
-import type { MagicForestRuinsPlan } from '../src/generation/libraries/magic-forest-ruins/MagicForestRuinsPlanner';
+import {
+  assembleMagicRuinsSite,
+  type MagicForestRuinsPlan,
+} from '../src/generation/libraries/magic-forest-ruins/generator';
+import { createMagicForestRuinsLibrary } from '../src/generation/libraries/magic-forest-ruins/MagicForestRuinsLibrary';
+import {
+  createMagicRuinsModelKit,
+  MAGIC_RUINS_MODEL_CATALOG,
+} from '../src/generation/models/magic-ruins';
 import { buildHorizontalCollisionProbe } from '../src/core/Collision';
 import { parseParams } from '../src/core/Params';
 
@@ -50,6 +58,40 @@ test('magic forest ruin planning is deterministic and emits occupancy', () => {
       assert.ok(terrain.waterAt(x, z) < terrain.heightAt(x, z) - 0.35);
     }
   }
+});
+
+test('magic ruins model kit is discoverable and independent from site planning', () => {
+  const ids = MAGIC_RUINS_MODEL_CATALOG.map((model) => model.id);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.deepEqual(ids, [
+    'magic-ruins/aged-stone-block',
+    'magic-ruins/crystal-spire',
+    'magic-ruins/portal-ring',
+    'magic-ruins/lichen-colony',
+  ]);
+
+  const plan = createDefaultWorldFeatureRegistry().plan(
+    'magic-forest-ruins',
+    { terrain, seed: new WorldSeed(42), worldHalf: 2048 },
+  ).plans[0] as MagicForestRuinsPlan;
+  const assembly = assembleMagicRuinsSite(plan.sites[0]!, terrain);
+  assert.ok(assembly.blocks.length > 100);
+  assert.ok(assembly.obstacles.length > 5);
+  assert.equal('group' in assembly, false);
+});
+
+test('magic forest ruins library creates its injected model kit only during build', () => {
+  let modelKitFactoryCalls = 0;
+  const library = createMagicForestRuinsLibrary(() => {
+    modelKitFactoryCalls++;
+    return createMagicRuinsModelKit();
+  });
+  const seed = new WorldSeed(13);
+  const plan = library.plan('ancient-grove', { terrain, seed, worldHalf: 2048 });
+  assert.equal(modelKitFactoryCalls, 0);
+  const runtime = library.build(plan, { terrain, seed });
+  assert.equal(modelKitFactoryCalls, 1);
+  assert.equal(runtime.group.name, 'feature-library:magic-forest-ruins');
 });
 
 test('feature registry builds an independent runtime with useful stats', () => {

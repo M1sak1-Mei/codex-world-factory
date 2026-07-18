@@ -1,10 +1,15 @@
-import type { Rng } from '../../../core/Seed';
+import type { Rng } from '../../../../core/Seed';
 import type {
   ScatterExclusionZone,
   TerrainSurface,
   WorldFeaturePlan,
   WorldFeaturePlanContext,
-} from '../../core/WorldFeature';
+} from '../../../core/WorldFeature';
+import {
+  MAGIC_RUINS_SITE_RADIUS,
+  MAGIC_RUINS_TARGET_DISTANCE,
+  SANCTUARY_ENTRANCE_ANGLE,
+} from './MagicForestRuinsLayout';
 import {
   magicForestRuinsRecipe,
   type MagicForestRuinsRecipe,
@@ -58,18 +63,6 @@ function footprintIsDry(
   return true;
 }
 
-const SITE_RADIUS: Readonly<Record<MagicRuinsSiteKind, number>> = {
-  sanctuary: 30,
-  'watch-circle': 22,
-  'forest-shrine': 18,
-};
-
-const TARGET_DISTANCE: Readonly<Record<MagicRuinsSiteKind, number>> = {
-  sanctuary: 320,
-  'watch-circle': 860,
-  'forest-shrine': 1320,
-};
-
 function candidateScore(
   terrain: TerrainSurface,
   recipe: MagicForestRuinsRecipe,
@@ -80,8 +73,6 @@ function candidateScore(
 ): Candidate | null {
   const y = terrain.heightAt(x, z);
   if (
-    // Include an access apron: the primary spawn and approach path live
-    // outside the masonry footprint and must be dry as well.
     !footprintIsDry(terrain, x, z, radius + 8)
     || y < recipe.minAltitude
     || y > recipe.maxAltitude
@@ -90,7 +81,7 @@ function candidateScore(
   const relief = terrain.reliefAt(x, z, radius, 16);
   if (slope > recipe.maxSlope * 1.45 || relief > recipe.maxRelief * 1.65) return null;
   const distance = Math.hypot(x, z);
-  const targetDistance = TARGET_DISTANCE[kind];
+  const targetDistance = MAGIC_RUINS_TARGET_DISTANCE[kind];
   const altitudeTarget = kind === 'sanctuary' ? 290 : kind === 'watch-circle' ? 390 : 330;
   const score =
     (slope / recipe.maxSlope) * 3.2
@@ -100,7 +91,11 @@ function candidateScore(
   return { x, z, y, slope, relief, score };
 }
 
-function isSpaced(candidate: Candidate, sites: readonly MagicRuinsSitePlan[], spacing: number): boolean {
+function isSpaced(
+  candidate: Candidate,
+  sites: readonly MagicRuinsSitePlan[],
+  spacing: number,
+): boolean {
   return sites.every((site) =>
     Math.hypot(candidate.x - site.center[0], candidate.z - site.center[1]) >= spacing,
   );
@@ -114,8 +109,8 @@ function pickSite(
   worldHalf: number,
   sites: readonly MagicRuinsSitePlan[],
 ): Candidate {
-  const radius = SITE_RADIUS[kind];
-  const target = TARGET_DISTANCE[kind];
+  const radius = MAGIC_RUINS_SITE_RADIUS[kind];
+  const target = MAGIC_RUINS_TARGET_DISTANCE[kind];
   const candidates: Candidate[] = [];
   for (let i = 0; i < 520; i++) {
     const angle = rng.range(0, Math.PI * 2);
@@ -149,9 +144,8 @@ function exclusionFor(site: MagicRuinsSitePlan): ScatterExclusionZone {
 
 function accessExclusionsFor(site: MagicRuinsSitePlan): ScatterExclusionZone[] {
   if (site.kind !== 'sanctuary') return [];
-  const entranceAngle = Math.PI * 0.5;
-  const localX = Math.cos(entranceAngle);
-  const localZ = Math.sin(entranceAngle);
+  const localX = Math.cos(SANCTUARY_ENTRANCE_ANGLE);
+  const localZ = Math.sin(SANCTUARY_ENTRANCE_ANGLE);
   const ca = Math.cos(site.yaw);
   const sa = Math.sin(site.yaw);
   const dirX = ca * localX + sa * localZ;
@@ -194,7 +188,7 @@ export function planMagicForestRuins(
       kind,
       center: [candidate.x, candidate.z],
       baseY: candidate.y,
-      radius: SITE_RADIUS[kind],
+      radius: MAGIC_RUINS_SITE_RADIUS[kind],
       yaw: rng.range(-Math.PI, Math.PI),
       ruinSeed: rng.u32(),
       magicVariant: rng.int(3),

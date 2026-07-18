@@ -156,6 +156,11 @@ feedback comes in chat; the two-frame test is the agent-side acceptance only.
   stone, rubble, crystals, portals/lights, terrain-conforming lichen colonies,
   automatic walk spawn, distance-gated detail, HUD stats, and generic capsule
   collision integrated into walk mode.
+- Refactored the first library into explicit reusable `models/magic-ruins/`
+  and scene-specific `libraries/magic-forest-ruins/generator/` layers. The
+  pure grammar now emits placement records only; the scene generator consumes
+  an injected typed model kit, while the library remains the composition root.
+  The model catalogue and lazy factory boundary are covered by tests.
 - Maintenance guide: `docs/WORLD-FEATURE-LIBRARIES.md`. Tests cover URL
   compatibility, environment override precedence, deterministic planning,
   runtime stats, and collision. Real WebGPU seed-42 capture reached ready with

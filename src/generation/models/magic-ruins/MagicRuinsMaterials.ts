@@ -10,7 +10,7 @@ import {
 import { fbm3, valueNoise3 } from '../../../gpu/noise/NoiseTSL';
 import type { NV3 } from '../../../gpu/TSLTypes';
 
-export interface MagicForestRuinsMaterials {
+export interface MagicRuinsMaterials {
   stone: MeshPhysicalNodeMaterial;
   ground: MeshPhysicalNodeMaterial;
   crystal: readonly MeshPhysicalNodeMaterial[];
@@ -43,7 +43,7 @@ function stoneMaterial(): MeshPhysicalNodeMaterial {
   return material;
 }
 
-function courtyardMaterial(): MeshPhysicalNodeMaterial {
+function lichenMaterial(): MeshPhysicalNodeMaterial {
   const material = new MeshPhysicalNodeMaterial();
   const broad = fbm3(positionWorld.mul(0.085).add(vec3(4.2, 13.7, -2.1)), 4)
     .mul(0.5)
@@ -76,10 +76,10 @@ function magicMaterial(variant: number, intensity: number): MeshPhysicalNodeMate
   return material;
 }
 
-export function buildMagicForestRuinsMaterials(): MagicForestRuinsMaterials {
+export function createMagicRuinsMaterials(): MagicRuinsMaterials {
   return {
     stone: stoneMaterial(),
-    ground: courtyardMaterial(),
+    ground: lichenMaterial(),
     crystal: MAGIC_COLORS.map((_color, index) => magicMaterial(index, 2.6)),
     portal: MAGIC_COLORS.map((_color, index) => magicMaterial(index, 4.8)),
   };

@@ -1,8 +1,8 @@
 # Procedural world-feature libraries
 
-The world factory separates terrain generation from authored-looking points
-of interest. A terrain recipe controls landform synthesis; a world recipe
-composes independent feature libraries and an environment profile.
+The world factory separates reusable visual models from scene-generation
+rules. Terrain recipes control landform synthesis; world recipes compose
+independent feature libraries and an environment profile.
 
 ```text
 URL / batch manifest
@@ -12,6 +12,8 @@ URL / batch manifest
        -> site plans + per-layer scatter exclusions
   -> terrain / vegetation GPU systems consume exclusions
   -> build(plan)
+       -> pure placement grammar
+       -> injected procedural model kit
        -> render groups + spawn + collision capsules + stats + LOD update
 ```
 
@@ -19,6 +21,41 @@ The contracts live in `src/generation/core/WorldFeature.ts`. Feature libraries
 never receive the concrete `Heightfield`, renderer, camera controller, or GPU
 scatter implementation. Renderer-specific adapters live in
 `src/generation/integrations/`.
+
+## Architecture boundary
+
+```text
+src/generation/
+  core/                         world composition contracts and registry
+  integrations/                 engine-specific adapters
+  models/
+    ProceduralModelKit.ts       common discoverable model-kit contract
+    magic-ruins/                geometry, materials, model constructors
+  libraries/
+    magic-forest-ruins/
+      MagicForestRuinsLibrary.ts  composition root / dependency injection
+      generator/
+        ...Recipe.ts            data-only content constraints
+        ...Planner.ts           terrain selection and occupancy
+        ...Grammar.ts           pure model placements and collision segments
+        ...SceneGenerator.ts    scene hierarchy, LOD, stats, and spawn
+```
+
+The layers have deliberately one-way dependencies:
+
+- A **model kit** knows how to construct a stone block, crystal, portal, or
+  lichen colony. It does not know what a sanctuary is or where a site belongs.
+- A **generator** knows site semantics and produces placement data. Its grammar
+  creates no Three.js scene objects or materials.
+- A **scene generator** turns placement data into a runtime by calling the
+  injected typed model-kit interface.
+- A **library** is only the composition root that pairs a planner, generator,
+  and model kit for registration in a world recipe.
+
+`MAGIC_RUINS_MODEL_CATALOG` makes the current primitives discoverable without
+booting a world. `createMagicForestRuinsLibrary(modelKitFactory)` is the swap
+point for a future high-fidelity, low-poly, biome-specific, or imported-asset
+model kit. Site planning and the grammar do not need to change.
 
 ## Magic forest ruins V1
 
@@ -59,17 +96,22 @@ HUD counters, and engine-agnostic 2D capsule collision.
 
 ## Adding the next library
 
-1. Create `src/generation/libraries/<library-id>/` with a typed recipe, planner,
-   builder, and material module.
-2. Implement `TypedWorldFeatureLibrary<TPlan>` and wrap it with
+1. Put reusable geometry and materials in `src/generation/models/<kit-id>/` and
+   expose a typed model-kit interface plus model catalogue.
+2. Create `src/generation/libraries/<library-id>/generator/` with a typed
+   recipe, planner, pure placement grammar, and scene generator.
+3. Keep terrain queries in the planner and geometry construction in the model
+   kit; pass plain placement records across the boundary.
+4. Implement `TypedWorldFeatureLibrary<TPlan>` and wrap it with
    `defineWorldFeatureLibrary`.
-3. Register the library in `DefaultWorldFeatures.ts`.
-4. Add a `WorldFeatureSpec` to a top-level recipe in `WorldRecipe.ts`.
-5. Emit layer-specific scatter exclusions and, where relevant, collision
+5. Register the library in `DefaultWorldFeatures.ts`.
+6. Add a `WorldFeatureSpec` to a top-level recipe in `WorldRecipe.ts`.
+7. Emit layer-specific scatter exclusions and, where relevant, collision
    capsules and a primary spawn.
-6. Add deterministic plan tests, runtime/stat tests, collision tests, and at
+8. Add model-catalogue, deterministic plan, pure-grammar, runtime/stat, and
+   collision tests, plus at
    least two real WebGPU captures using different seeds or terrain recipes.
-7. Verify the legacy `wilderness` recipe remains unchanged.
+9. Verify the legacy `wilderness` recipe remains unchanged.
 
 The intended next reusable modules are path/road graphs, plot and footprint
 allocation, modular building grammar, interior/door connectors, prop sockets,
