@@ -28,10 +28,16 @@ import { PostStack } from '../render/PostStack';
 import { setupSunShadows } from '../render/ShadowSetup';
 import { Clouds } from '../sky/Clouds';
 import { SunSky } from '../sky/SunSky';
+import { createDefaultWorldFeatureRegistry } from '../generation/DefaultWorldFeatures';
+import { heightfieldTerrainSurface } from '../generation/integrations/HeightfieldTerrainSurface';
+import { WORLD_HALF } from '../world/WorldConst';
+import { buildHorizontalCollisionProbe } from '../core/Collision';
+import { worldRecipe } from '../generation/core/WorldRecipe';
 import type { WorldContext } from './Scenes';
 
 export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
   const { engine, params, seed } = ctx;
+  const environment = worldRecipe(params.worldRecipe).environment;
 
   const hf = await Heightfield.generate(
     engine.renderer,
@@ -50,6 +56,18 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
     engine.stats.counters['terrain.maxH'] = Math.round(maxH);
   }
 
+  // Plan feature libraries before GPU scatter so their occupancy clears
+  // vegetation at the source. The planner only sees TerrainSurface, keeping
+  // concrete Heightfield and renderer details out of every content library.
+  ctx.progress(0.925, 'world: planning procedural features');
+  const terrainSurface = heightfieldTerrainSurface(hf);
+  const featureRegistry = createDefaultWorldFeatureRegistry();
+  const featurePlan = featureRegistry.plan(params.worldRecipe, {
+    terrain: terrainSurface,
+    seed,
+    worldHalf: WORLD_HALF,
+  });
+
   // physical sky first: probe gathering needs the atmosphere LUTs.
   // ?shot=N boots straight into a composed bookmark — use ITS time of day
   const bootBm = params.shot !== null ? BOOKMARKS[params.shot - 1] : undefined;
@@ -66,7 +84,9 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
   // heightfield; the canopy map is their only knowledge of the forest) and
   // before tiles (under-crown ambient)
   ctx.progress(0.94, 'vegetation: scattering instances');
-  const scatter = await runScatter(engine.renderer, hf, seed);
+  const scatter = await runScatter(engine.renderer, hf, seed, {
+    exclusions: featurePlan.exclusions,
+  });
   const canopyTex = await buildCanopyMap(engine.renderer, scatter.trees);
   engine.stats.counters['veg.trees'] = scatter.trees.count;
   engine.stats.counters['veg.under'] = scatter.understory.count;
@@ -106,12 +126,22 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
     setWindContext({ noiseA: hf.noiseA, canopyTex });
     const q0 = new URLSearchParams(window.location.search);
     const ws = Number(q0.get('wind') ?? NaN);
-    if (Number.isFinite(ws)) windU.strength.value = ws;
+    windU.strength.value = Number.isFinite(ws) ? ws : environment.windStrength;
     const wdeg = Number(q0.get('winddir') ?? NaN);
     if (Number.isFinite(wdeg)) {
       windU.dir.value.set(Math.cos((wdeg * Math.PI) / 180), Math.sin((wdeg * Math.PI) / 180));
     }
   }
+
+  ctx.progress(0.957, 'world: building procedural features');
+  const worldFeatures = featureRegistry.build(featurePlan, {
+    terrain: terrainSurface,
+    seed,
+  });
+  engine.scene.add(worldFeatures.group);
+  engine.onUpdate(() => worldFeatures.update(engine.camera));
+  Object.assign(engine.stats.counters, worldFeatures.stats);
+  ctx.hooks.collisionProbe = buildHorizontalCollisionProbe(worldFeatures.obstacles);
 
   ctx.progress(0.958, 'terrain: building tiles');
   const view = new URLSearchParams(window.location.search).get('view');
@@ -177,7 +207,13 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
 
     // near-field carpets: 800k-blade grass ring + 80k debris ring
     if (!ablate.has('grass')) {
-      const ring = new GroundRing(hf, canopyTex, seed, ablate.has('gi') ? null : gi);
+      const ring = new GroundRing(
+        hf,
+        canopyTex,
+        seed,
+        ablate.has('gi') ? null : gi,
+        featurePlan.exclusions,
+      );
       ring.init(lib.atlases.get('beech') ?? null);
       engine.scene.add(ring.group);
       engine.onUpdate(() => {
@@ -229,7 +265,7 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
   if (!ablate.has('froxels')) {
     froxels = new Froxels(hf, sunSky.atmosphere, canopyTex, clouds);
     const fq = Number(new URLSearchParams(window.location.search).get('fog') ?? NaN);
-    if (Number.isFinite(fq)) froxels.fogK.value = fq;
+    froxels.fogK.value = Number.isFinite(fq) ? fq : environment.fogDensity;
     const fx = froxels;
     engine.onUpdate(() => fx.update(engine.renderer, engine.camera));
   }
@@ -278,14 +314,25 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
       ctx.hooks.initialPoseMode = 'fly';
       engine.camera.position.set(x, y, z);
     } else {
-      const spawn = findWalkSpawn(hf);
-      ctx.hooks.initialPose = {
-        p: [spawn.x, hf.heightAtCpu(spawn.x, spawn.z) + 1.7, spawn.z],
-        yaw: -0.78, // face NE — the serrated massif anchors the first frame
-        pitch: -0.02,
-      };
-      ctx.hooks.initialPoseMode = 'walk';
-      engine.camera.position.set(spawn.x, ctx.hooks.initialPose.p[1], spawn.z);
+      const featureSpawn = params.shot === null ? worldFeatures.primarySpawn : null;
+      if (featureSpawn) {
+        ctx.hooks.initialPose = {
+          p: featureSpawn.position,
+          yaw: featureSpawn.yaw,
+          pitch: featureSpawn.pitch,
+        };
+        ctx.hooks.initialPoseMode = featureSpawn.mode;
+        engine.camera.position.set(...featureSpawn.position);
+      } else {
+        const spawn = findWalkSpawn(hf);
+        ctx.hooks.initialPose = {
+          p: [spawn.x, hf.heightAtCpu(spawn.x, spawn.z) + 1.7, spawn.z],
+          yaw: -0.78, // face NE — the serrated massif anchors the first frame
+          pitch: -0.02,
+        };
+        ctx.hooks.initialPoseMode = 'walk';
+        engine.camera.position.set(spawn.x, ctx.hooks.initialPose.p[1], spawn.z);
+      }
     }
   }
 

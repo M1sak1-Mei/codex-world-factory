@@ -55,9 +55,28 @@ render it through the real WebGPU world with `npm run terrain:shoot`. See
 [docs/TERRAIN-GENERATOR.md](docs/TERRAIN-GENERATOR.md) for recipe authoring,
 batch options, and the maintenance checklist.
 
+## Procedural fantasy feature libraries
+
+The optional `?world=` parameter composes terrain-independent point-of-interest
+libraries with environment defaults. The first maintained library is
+`magic-forest-ruins`:
+
+```text
+http://localhost:5173/?world=magic-forest-ruins&terrain=laas&seed=42&preset=low
+```
+
+It deterministically selects valid terrain sites and builds a sanctuary, watch
+circle, and forest shrine with broken masonry, lichen, rubble, crystals,
+portals, vegetation clearance, automatic walk spawn, LOD, stats, and collision.
+The original world remains available as `?world=wilderness` and is the fallback
+for missing or unknown values. See
+[docs/WORLD-FEATURE-LIBRARIES.md](docs/WORLD-FEATURE-LIBRARIES.md) for the
+contracts and the checklist for adding buildings, roads, settlements, and the
+next fantasy content library.
+
 Controls: click to capture the mouse. WASD to move, Shift to sprint, Space to jump, V toggles walk/fly, mouse wheel sets fly speed, E/Q move vertically in fly mode. Keys 1–9 jump to composed bookmarks, F starts the flythrough, F3 opens the debug HUD with per-pass GPU timings, P prints the current camera pose as a `?cam=` string.
 
-Useful URL parameters: `?seed=N` (world seed), `?terrain=laas|folded-ranges|rift-valley|caldera-lake` (macro terrain recipe), `?T=hours` (time of day, 0–24), `?shot=1..9` (boot into a bookmark), `?cam=x,y,z,yaw,pitch[,fov]` (exact pose), `?preset=low|high|ultra`, `?freeze=1` (freeze world motion), `?hud=1` (HUD open at boot).
+Useful URL parameters: `?seed=N` (world seed), `?terrain=laas|folded-ranges|rift-valley|caldera-lake` (macro terrain recipe), `?world=wilderness|magic-forest-ruins` (feature composition), `?T=hours` (time of day, 0–24), `?shot=1..9` (boot into a bookmark), `?cam=x,y,z,yaw,pitch[,fov]` (exact pose), `?preset=low|high|ultra`, `?freeze=1` (freeze world motion), `?hud=1` (HUD open at boot).
 
 ## Repository map
 
@@ -66,7 +85,8 @@ Useful URL parameters: `?seed=N` (world seed), `?terrain=laas|folded-ranges|rift
 | `PROJECT_LAAS_v2.md` | The brief. The only human-authored document in the repository. |
 | `STATUS.md` | The model's working memory: current state, diagnosis logs, measurements, decision history. |
 | `docs/THREE-NOTES.md` | Verified three.js/TSL/WebGPU API notes the model accumulated against the pinned version. |
+| `docs/WORLD-FEATURE-LIBRARIES.md` | World-feature contracts and the library authoring checklist. |
 | `docs/DELTA.md`, `docs/DEVIATIONS.md` | Reference-comparison loops per phase, and spec deviations with reasons. |
-| `src/` | Engine and world: `core/`, `gpu/`, `world/`, `vegetation/`, `render/`, `sky/`, `debug/`. |
+| `src/` | Engine and world: `core/`, `generation/`, `gpu/`, `world/`, `vegetation/`, `render/`, `sky/`, `debug/`. |
 | `tools/` | The model's verification harness: headless WebGPU screenshots, image comparison, pixel sampling, GPU profiling, bug-specific probes. |
 | `reference/` | The reference frames the world is judged against. |

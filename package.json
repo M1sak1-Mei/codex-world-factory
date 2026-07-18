@@ -13,6 +13,7 @@
     "terrain:batch": "tsx tools/terrain-batch.ts",
     "terrain:shoot": "tsx tools/terrain-batch-shoot.ts",
     "test:terrain": "tsx --test tools/terrain-recipes.test.ts",
+    "test:world": "tsx --test tools/terrain-recipes.test.ts tools/world-features.test.ts",
     "compare": "tsx tools/compare.ts",
     "battery": "tsx tools/battery.ts"
   },

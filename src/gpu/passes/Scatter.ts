@@ -42,6 +42,8 @@ import {
   vec4,
 } from 'three/tsl';
 import type { WorldSeed } from '../../core/Seed';
+import type { ScatterExclusionZone } from '../../generation/core/WorldFeature';
+import { scatterExclusionMask } from '../../generation/integrations/ScatterExclusionTSL';
 import type { Heightfield } from '../../world/Heightfield';
 import { LAKE_LEVEL, TREELINE, WORLD_SIZE } from '../../world/WorldConst';
 import { fbm3 } from '../noise/NoiseTSL';
@@ -95,6 +97,11 @@ export interface ScatterResult {
   extras: ScatterLayer;
   /** stones (3 size classes) + fallen branches — ground-solid coverage */
   stones: ScatterLayer;
+}
+
+export interface ScatterOptions {
+  /** CPU-planned structures clear vegetation before instances are appended. */
+  exclusions?: readonly ScatterExclusionZone[];
 }
 
 // child-grid cell sizes (m) — jitter spans the full cell, so no grid reads
@@ -365,7 +372,9 @@ export async function runScatter(
   renderer: Renderer,
   hf: Heightfield,
   seed: WorldSeed,
+  options: ScatterOptions = {},
 ): Promise<ScatterResult> {
+  const exclusions = options.exclusions ?? [];
   const sT = seed.sub('scatter/trees') & 0x7fffffff;
   const sU = seed.sub('scatter/understory') & 0x7fffffff;
   const sE = seed.sub('scatter/extras') & 0x7fffffff;
@@ -384,6 +393,9 @@ export async function runScatter(
     const cell = vec2(float(i.mod(treeG)), float(i.div(treeG)));
     const jit = cellHash2(cell, sT);
     const wpos = cell.add(jit).div(treeG).sub(0.5).mul(WORLD_SIZE);
+    If(scatterExclusionMask(wpos, exclusions, 'treeRadius').greaterThan(0.5), () => {
+      Return();
+    });
     const s = sampleSite(hf, wpos);
 
     // hard exclusions: open/standing water, river channels, lake shelf
@@ -500,6 +512,9 @@ export async function runScatter(
     const cell = vec2(float(i.mod(underG)), float(i.div(underG)));
     const jit = cellHash2(cell, sU);
     const wpos = cell.add(jit).div(underG).sub(0.5).mul(WORLD_SIZE);
+    If(scatterExclusionMask(wpos, exclusions, 'understoryRadius').greaterThan(0.5), () => {
+      Return();
+    });
     const s = sampleSite(hf, wpos);
 
     If(s.h.lessThan(LAKE_LEVEL + 0.35), () => {
@@ -602,6 +617,9 @@ export async function runScatter(
     const cell = vec2(float(i.mod(extraG)), float(i.div(extraG)));
     const jit = cellHash2(cell, sE);
     const wpos = cell.add(jit).div(extraG).sub(0.5).mul(WORLD_SIZE);
+    If(scatterExclusionMask(wpos, exclusions, 'extrasRadius').greaterThan(0.5), () => {
+      Return();
+    });
     const s = sampleSite(hf, wpos);
 
     If(s.h.lessThan(LAKE_LEVEL + 0.3), () => {
@@ -716,6 +734,9 @@ export async function runScatter(
     const cell = vec2(float(i.mod(stoneG)), float(i.div(stoneG)));
     const jit = cellHash2(cell, sS);
     const wpos = cell.add(jit).div(stoneG).sub(0.5).mul(WORLD_SIZE);
+    If(scatterExclusionMask(wpos, exclusions, 'stonesRadius').greaterThan(0.5), () => {
+      Return();
+    });
     const s = sampleSite(hf, wpos);
     If(s.h.lessThan(LAKE_LEVEL + 0.25), () => {
       Return();

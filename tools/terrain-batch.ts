@@ -9,6 +9,11 @@ import {
   terrainRecipe,
   type TerrainRecipeId,
 } from '../src/world/TerrainRecipe';
+import {
+  WORLD_RECIPE_IDS,
+  isWorldRecipeId,
+  type WorldRecipeId,
+} from '../src/generation/core/WorldRecipe';
 
 type QualityPreset = 'low' | 'high' | 'ultra';
 
@@ -16,6 +21,7 @@ export interface TerrainBatchEntry {
   id: string;
   recipe: TerrainRecipeId;
   recipeLabel: string;
+  worldRecipe: WorldRecipeId;
   seed: number;
   shot: number;
   url: string;
@@ -34,6 +40,7 @@ export interface BuildTerrainBatchOptions {
   shots: readonly number[];
   preset: QualityPreset;
   timeOfDay: number;
+  worldRecipe: WorldRecipeId;
 }
 
 interface Flags {
@@ -99,6 +106,11 @@ function parsePreset(value: string): QualityPreset {
   throw new Error(`preset: expected low, high, or ultra; received ${value}`);
 }
 
+function parseWorldRecipe(value: string): WorldRecipeId {
+  if (isWorldRecipeId(value)) return value;
+  throw new Error(`world: unknown recipe ${value}; expected ${WORLD_RECIPE_IDS.join(', ')}`);
+}
+
 export function buildTerrainBatch(options: BuildTerrainBatchOptions): TerrainBatchManifest {
   const entries: TerrainBatchEntry[] = [];
   for (const recipeId of options.recipes) {
@@ -114,6 +126,7 @@ export function buildTerrainBatch(options: BuildTerrainBatchOptions): TerrainBat
         url.searchParams.set('scene', 'world');
         url.searchParams.set('seed', String(rawSeed));
         url.searchParams.set('terrain', recipeId);
+        url.searchParams.set('world', options.worldRecipe);
         url.searchParams.set('preset', options.preset);
         url.searchParams.set('shot', String(shot));
         url.searchParams.set('T', String(options.timeOfDay));
@@ -123,6 +136,7 @@ export function buildTerrainBatch(options: BuildTerrainBatchOptions): TerrainBat
           id: `${recipeId}-s${rawSeed}-shot${shot}`,
           recipe: recipeId,
           recipeLabel: terrainRecipe(recipeId).label,
+          worldRecipe: options.worldRecipe,
           seed: rawSeed,
           shot,
           url: url.toString(),
@@ -142,6 +156,7 @@ function usage(): string {
     '  --seeds 1..4,100',
     '  --shots 1,5,9',
     '  --preset low|high|ultra',
+    '  --world wilderness|magic-forest-ruins',
     '  --time 11',
     '  --base-url http://localhost:5173/',
     '  --out generated/terrain-batch.json',
@@ -158,6 +173,7 @@ async function main(): Promise<void> {
   const seeds = parseIntegerList(stringFlag(flags, 'seeds', '1'), 'seeds');
   const shots = parseIntegerList(stringFlag(flags, 'shots', '1'), 'shots');
   const preset = parsePreset(stringFlag(flags, 'preset', 'low'));
+  const worldRecipe = parseWorldRecipe(stringFlag(flags, 'world', 'wilderness'));
   const timeOfDay = Number(stringFlag(flags, 'time', '11'));
   if (!Number.isFinite(timeOfDay) || timeOfDay < 0 || timeOfDay > 24) {
     throw new Error(`time must be in 0..24; received ${timeOfDay}`);
@@ -169,6 +185,7 @@ async function main(): Promise<void> {
     shots,
     preset,
     timeOfDay,
+    worldRecipe,
   });
   const out = stringFlag(flags, 'out', 'generated/terrain-batch.json');
   await mkdir(dirname(out), { recursive: true });

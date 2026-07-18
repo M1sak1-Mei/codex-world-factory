@@ -92,6 +92,7 @@ export interface LaasPageOptions {
   scene?: string;
   seed?: number;
   terrain?: string;
+  world?: string;
   T?: number;
   cam?: string;
   preset?: string;
@@ -107,6 +108,7 @@ export function laasUrl(opts: LaasPageOptions, base = 'http://localhost:5173/'):
   if (opts.scene) q.set('scene', opts.scene);
   if (opts.seed !== undefined) q.set('seed', String(opts.seed));
   if (opts.terrain) q.set('terrain', opts.terrain);
+  if (opts.world) q.set('world', opts.world);
   if (opts.T !== undefined) q.set('T', String(opts.T));
   if (opts.cam) q.set('cam', opts.cam);
   if (opts.preset) q.set('preset', opts.preset);

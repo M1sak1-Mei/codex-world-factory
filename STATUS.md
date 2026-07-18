@@ -140,6 +140,31 @@ feedback comes in chat; the two-frame test is the agent-side acceptance only.
 - Next generator expansion: move biome-zone anchors and drainage splines into
   recipe data; add automatic flooded-area, height-range, and GPU-cost gates.
 
+## Procedural world-feature factory: magic forest ruins (2026-07-18)
+
+- Added top-level `WorldRecipe` composition and a typed feature-library
+  registry. `?world=wilderness` preserves the original scene;
+  `?world=magic-forest-ruins` composes the first library and supplies
+  overrideable environment defaults.
+- Planning depends only on the read-only `TerrainSurface` contract. The
+  deterministic `ancient-grove` recipe scores dry, low-slope, low-relief sites
+  and places a sanctuary, watch circle, and forest shrine with stable named RNG
+  streams.
+- Feature plans emit per-layer occupancy. Both boot-time GPU scatter and the
+  camera-following grass/debris rings consume the same exclusion contract.
+- Runtime content includes supported ruin-wall profiles, procedural instanced
+  stone, rubble, crystals, portals/lights, terrain-conforming lichen colonies,
+  automatic walk spawn, distance-gated detail, HUD stats, and generic capsule
+  collision integrated into walk mode.
+- Maintenance guide: `docs/WORLD-FEATURE-LIBRARIES.md`. Tests cover URL
+  compatibility, environment override precedence, deterministic planning,
+  runtime stats, and collision. Real WebGPU seed-42 capture reached ready with
+  3 sites / 847 blocks / 40 crystals / 2 portals and a settled 1080p sample of
+  about 84 FPS on the current Windows/NVIDIA machine.
+- Next factory modules: road/path graph, plot allocation, reusable building
+  grammar (facades/arches/roofs/doors), prop sockets, interior connectors, and
+  batch quality gates across seeds and terrain recipes.
+
 ## Current focus
 
 **Phase 2 — atmosphere, shadows, clouds, post** + USER FEEDBACK BATCH 1 (2026-06-11).

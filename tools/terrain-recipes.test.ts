@@ -33,6 +33,7 @@ test('batch manifest is a deterministic Cartesian product', () => {
     shots: [1, 5],
     preset: 'low' as const,
     timeOfDay: 11,
+    worldRecipe: 'wilderness' as const,
   };
   const a = buildTerrainBatch(options);
   const b = buildTerrainBatch(options);

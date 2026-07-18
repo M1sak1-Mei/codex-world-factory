@@ -75,6 +75,7 @@ async function boot(): Promise<void> {
 
   // terrain probe first — walk mode + fly soft-collision depend on it
   if (hooks.groundProbe) fly.groundProbe = hooks.groundProbe;
+  if (hooks.collisionProbe) fly.collisionProbe = hooks.collisionProbe;
   if (params.cam !== null) {
     const pose = parseCamString(params.cam);
     if (pose) fly.setPose(pose); // explicit pose ⇒ fly semantics

@@ -14,6 +14,7 @@
 import type { PerspectiveCamera } from 'three';
 import { Vector3 } from 'three';
 import type { CamPose } from './Hooks';
+import type { HorizontalCollisionProbe } from './Collision';
 
 const FORWARD = new Vector3();
 const RIGHT = new Vector3();
@@ -45,6 +46,7 @@ const DIP_C = 18; // landing-dip spring damping
 // fly-mode soft collision (legacy contract from TerrainScene)
 const FLY_GROUND_CLEAR = 1.4;
 const WADE_CLEAR = 0.45; // eye stays above water (no underwater rendering)
+const PLAYER_RADIUS = 0.38;
 // Browsers enforce a cooldown (~1.25 s in Chromium) after the user exits
 // pointer lock with ESC — a requestPointerLock() inside it is REJECTED
 // ("pointer lock cannot be acquired immediately after exiting"). Clicks in
@@ -63,6 +65,7 @@ export class FlyCamera {
   enabled = true;
   /** terrain probe — walk mode is unavailable until the scene installs it */
   groundProbe: GroundProbe | null = null;
+  collisionProbe: HorizontalCollisionProbe | null = null;
 
   private modeV: CamMode = 'fly';
   private keys = new Set<string>();
@@ -353,8 +356,20 @@ export class FlyCamera {
     MOVE.multiplyScalar(target);
     this.vel.x += (MOVE.x - this.vel.x) * damp;
     this.vel.z += (MOVE.z - this.vel.z) * damp;
+    const previousX = this.basePos.x;
+    const previousZ = this.basePos.z;
     this.basePos.x += this.vel.x * dt;
     this.basePos.z += this.vel.z * dt;
+    if (this.collisionProbe) {
+      const resolved = this.collisionProbe(this.basePos.x, this.basePos.z, PLAYER_RADIUS);
+      this.basePos.x = resolved.x;
+      this.basePos.z = resolved.z;
+      if (resolved.blocked && dt > 1e-5) {
+        // Preserve tangential displacement so the player slides along walls.
+        this.vel.x = (resolved.x - previousX) / dt;
+        this.vel.z = (resolved.z - previousZ) / dt;
+      }
+    }
 
     // ---- vertical: gravity, jump (held OR buffered tap), ground clamp
     const jumpBuffered = this.jumpAt >= 0 && performance.now() - this.jumpAt < 150;

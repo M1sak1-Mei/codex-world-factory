@@ -3,6 +3,7 @@ dist/
 .DS_Store
 .cache/
 generated/
+/outputs/
 test-results/
 shots/*
 !shots/phase-*

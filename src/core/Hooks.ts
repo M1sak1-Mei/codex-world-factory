@@ -3,6 +3,8 @@
  * (Playwright verification harness reads/writes `window.__laas`).
  */
 
+import type { HorizontalCollisionProbe } from './Collision';
+
 export interface CamPose {
   /** world position */
   p: [number, number, number];
@@ -58,6 +60,8 @@ export interface LaasHooks {
   initialPoseMode: 'walk' | 'fly' | null;
   /** terrain/water heights at (x, z) — walk mode + fly soft collision */
   groundProbe: ((x: number, z: number) => { ground: number; water: number }) | null;
+  /** World-feature obstacles; walk controller remains content-library agnostic. */
+  collisionProbe: HorizontalCollisionProbe | null;
   setTimeOfDay: ((t: number) => void) | null;
   /** settle frames (TAA/temporal effects) then resolve — call before screenshots */
   settle: ((frames?: number) => Promise<void>) | null;
@@ -84,6 +88,7 @@ export function initHooks(): LaasHooks {
     initialPose: null,
     initialPoseMode: null,
     groundProbe: null,
+    collisionProbe: null,
     setTimeOfDay: null,
     settle: null,
     flyCamEnabled: null,

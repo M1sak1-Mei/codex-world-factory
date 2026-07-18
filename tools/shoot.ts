@@ -5,6 +5,7 @@
  * Usage:
  *   npx tsx tools/shoot.ts --scene sanity --out shots/sanity.png
  *   npx tsx tools/shoot.ts --terrain folded-ranges --seed 42 --out shots/folds.png
+ *   npx tsx tools/shoot.ts --world magic-forest-ruins --seed 42 --out shots/ruins.png
  *   npx tsx tools/shoot.ts --scene world --T 17.5 --cam "10,50,30,1.2,-0.1,55" \
  *     --w 1920 --h 1080 --stats shots/sanity-stats.json
  */
@@ -65,6 +66,8 @@ async function main(): Promise<void> {
   if (args['seed'] !== undefined) urlOpts.seed = Number(str(args['seed']));
   const terrain = str(args['terrain']);
   if (terrain) urlOpts.terrain = terrain;
+  const world = str(args['world']);
+  if (world) urlOpts.world = world;
   if (args['T'] !== undefined) urlOpts.T = Number(str(args['T']));
   const cam = str(args['cam']);
   if (cam) urlOpts.cam = cam;
@@ -74,7 +77,7 @@ async function main(): Promise<void> {
   urlOpts.freeze = args['nofreeze'] !== true;
   // forward any flag not consumed above as a raw ?key=value page param
   const consumed = new Set([
-    'w', 'h', 'scene', 'out', 'settle', 'timeout', 'seed', 'terrain', 'T', 'cam',
+    'w', 'h', 'scene', 'out', 'settle', 'timeout', 'seed', 'terrain', 'world', 'T', 'cam',
     'preset', 'hud', 'nofreeze', 'stats',
   ]);
   const extra: Record<string, string> = {};

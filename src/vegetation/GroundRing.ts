@@ -86,6 +86,8 @@ import {
 import { buildRock } from './RockBuilder';
 import type { WorldSeed } from '../core/Seed';
 import { runiform } from '../gpu/RenderUniform';
+import type { ScatterExclusionZone } from '../generation/core/WorldFeature';
+import { scatterExclusionMask } from '../generation/integrations/ScatterExclusionTSL';
 
 const GRASS_GRID = 3072;
 const GRASS_CELL = 0.105; // m → ±161 m ring, ~90 slots/m²
@@ -310,6 +312,7 @@ export class GroundRing {
     private canopyTex: StorageTexture,
     private seed: WorldSeed,
     private gi: ProbeGI | null = null,
+    private exclusions: readonly ScatterExclusionZone[] = [],
   ) {}
 
   /**
@@ -429,6 +432,9 @@ export class GroundRing {
       If(dist.greaterThan(GRASS_R), () => {
         Return();
       });
+      If(scatterExclusionMask(wpos, this.exclusions, 'understoryRadius').greaterThan(0.5), () => {
+        Return();
+      });
       const uvW = wpos.div(WORLD_SIZE).add(0.5);
       const bio = texture(
         hf.biomeTex as NonNullable<typeof hf.biomeTex>,
@@ -522,6 +528,9 @@ export class GroundRing {
       If(dist.greaterThan(DEB_R), () => {
         Return();
       });
+      If(scatterExclusionMask(wpos, this.exclusions, 'extrasRadius').greaterThan(0.5), () => {
+        Return();
+      });
       const uvW = wpos.div(WORLD_SIZE).add(0.5);
       const bio = texture(
         hf.biomeTex as NonNullable<typeof hf.biomeTex>,
@@ -612,6 +621,9 @@ export class GroundRing {
       const wpos = wc.add(jit).mul(FAR_CELL);
       const dist = wpos.sub(vec2(camU.x, camU.z)).length();
       If(dist.lessThan(FAR_R0 - 16).or(dist.greaterThan(FAR_R)), () => {
+        Return();
+      });
+      If(scatterExclusionMask(wpos, this.exclusions, 'understoryRadius').greaterThan(0.5), () => {
         Return();
       });
       const uvW = wpos.div(WORLD_SIZE).add(0.5);
