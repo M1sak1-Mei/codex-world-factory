@@ -17,6 +17,7 @@
 import {
   abs,
   clamp,
+  exp,
   float,
   max,
   min,
@@ -30,9 +31,17 @@ import {
 } from 'three/tsl';
 import type { Rng, WorldSeed } from '../core/Seed';
 import type { NF, NV2 } from '../gpu/TSLTypes';
+import {
+  resolveGaussianStamps,
+  type GaussianStamp,
+  type TerrainRecipeId,
+} from './TerrainRecipe';
 import { KARST_PLATEAU, LAKE_LEVEL, WORLD_HALF } from './WorldConst';
 
 export interface MacroParams {
+  recipeId: TerrainRecipeId;
+  /** Seed-resolved, art-directed terrain modifiers. */
+  gaussianStamps: GaussianStamp[];
   alpC: [number, number];
   alpR: number;
   lakeC: [number, number];
@@ -56,7 +65,10 @@ function jit(rng: Rng, base: [number, number], amount: number): [number, number]
   return [base[0] + rng.range(-amount, amount), base[1] + rng.range(-amount, amount)];
 }
 
-export function makeMacroParams(seed: WorldSeed): MacroParams {
+export function makeMacroParams(
+  seed: WorldSeed,
+  recipeId: TerrainRecipeId = 'laas',
+): MacroParams {
   // separate streams per component: adding draws to one never re-rolls others
   const rngAnchor = seed.rng('macro-anchors');
   const rngValley = seed.rng('macro-valley');
@@ -86,6 +98,8 @@ export function makeMacroParams(seed: WorldSeed): MacroParams {
     valley[3] as [number, number],
   ];
   return {
+    recipeId,
+    gaussianStamps: resolveGaussianStamps(seed, recipeId),
     alpC: jit(rngAnchor, [1460, -1470], 150),
     alpR: 1820 + rngAnchor.range(-120, 120),
     lakeC,
@@ -110,6 +124,29 @@ export function makeMacroParams(seed: WorldSeed): MacroParams {
       far: off(),
     },
   };
+}
+
+interface GaussianFields {
+  height: NF;
+  hardness: NF;
+}
+
+/** Evaluate all recipe stamps as a compact TSL expression graph. */
+function gaussianFields(p: NV2, stamps: readonly GaussianStamp[]): GaussianFields {
+  let height: NF = float(0);
+  let hardness: NF = float(0);
+  for (const stamp of stamps) {
+    const ca = Math.cos(stamp.rotation);
+    const sa = Math.sin(stamp.rotation);
+    const q = p.sub(vec2(stamp.center[0], stamp.center[1]));
+    const localX = q.x.mul(ca).add(q.y.mul(sa)).div(stamp.sigma[0]);
+    const localY = q.y.mul(ca).sub(q.x.mul(sa)).div(stamp.sigma[1]);
+    const exponent = localX.mul(localX).add(localY.mul(localY)).mul(-0.5 * stamp.sharpness);
+    const weight = exp(exponent);
+    height = height.add(weight.mul(stamp.amplitude));
+    hardness = hardness.add(weight.mul(stamp.hardness));
+  }
+  return { height, hardness };
 }
 
 /** smooth 1→0 radial falloff */
@@ -255,6 +292,7 @@ export function macroTerrain(p: NV2, mp: MacroParams, detail: 'full' | 'far'): M
   const vf = valleyFields(p, mp);
   const valleyDist = vf.valleyDist;
   const tribDist = vf.tribDist;
+  const recipe = gaussianFields(p, mp.gaussianStamps);
 
   // --- base + hills ----------------------------------------------------------
   // NOTE mx_noise/mx_fractal outputs are SIGNED (≈[-1,1]) — remap explicitly.
@@ -329,7 +367,9 @@ export function macroTerrain(p: NV2, mp: MacroParams, detail: 'full' | 'far'): M
   const detailN = full
     ? mx_fractal_noise_float(p.div(62).add(vec2(o.detail[0], o.detail[1])), 4, 2.05, 0.5, 1).mul(7)
     : float(0);
-  let h: NF = base.add(mountains).add(towers).add(detailN);
+  // Recipe stamps land before drainage carving so the established valley and
+  // outlet remain authoritative even when a new range crosses the map.
+  let h: NF = base.add(mountains).add(towers).add(detailN).add(recipe.height);
 
   // --- far shell: outer ranges beyond the world edge --------------------------
   if (!full) {
@@ -389,6 +429,7 @@ export function macroTerrain(p: NV2, mp: MacroParams, detail: 'full' | 'far'): M
       .add(strata.mul(0.36))
       .add(tKarst.mul(0.28))
       .add(tAlp.mul(0.18))
+      .add(recipe.hardness)
       .sub(tLake.mul(0.2)),
     0.08,
     0.97,

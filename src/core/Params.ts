@@ -1,5 +1,7 @@
 /** URL parameter parsing — every run is fully described by its URL. */
 
+import { parseTerrainRecipeId, type TerrainRecipeId } from '../world/TerrainRecipe';
+
 export type QualityPreset = 'low' | 'high' | 'ultra';
 
 export interface LaasParams {
@@ -11,6 +13,8 @@ export interface LaasParams {
   timeOfDay: number;
   /** quality preset: low (iGPU floor), high (default), ultra (max grids) */
   preset: QualityPreset;
+  /** art-directed Gaussian terrain recipe layered into macro synthesis */
+  terrainRecipe: TerrainRecipeId;
   /** HUD visible at boot */
   hud: boolean;
   /** camera pose: "px,py,pz,yaw,pitch[,fov]" */
@@ -40,6 +44,7 @@ export function parseParams(search: string = window.location.search): LaasParams
     scene: q.get('scene') ?? 'world',
     timeOfDay: Math.min(24, Math.max(0, num(q.get('T'), 11))),
     preset,
+    terrainRecipe: parseTerrainRecipeId(q.get('terrain')),
     // full debug panel hidden by default — F3 toggles it (fps chip always on)
     hud: q.get('hud') === '1',
     cam: q.get('cam'),

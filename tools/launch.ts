@@ -17,12 +17,17 @@ interface LaunchRecipe {
  * IMPORTANT (discovered empirically on this machine):
  *  - WebGPU requires a secure context — probe on http://localhost, never about:blank
  *    (navigator.gpu is simply absent on opaque origins).
- *  - Playwright's default headless uses the GPU-less "headless shell": adapter = null.
- *    Full Chromium new-headless via channel:'chromium' yields an apple/metal-3 adapter.
+ *  - Playwright's default headless can use a GPU-less "headless shell": adapter = null.
+ *    A full installed browser channel (managed Chromium or system Edge) is required.
  */
 const CANDIDATES: LaunchRecipe[] = [
   { headless: true, channel: 'chromium', args: [] },
   { headless: true, channel: 'chromium', args: ['--enable-unsafe-webgpu'] },
+  // Windows contributors commonly have system Edge but no Playwright-managed
+  // Chromium. Keep these after the pinned channel so CI behavior is unchanged.
+  { headless: true, channel: 'msedge', args: [] },
+  { headless: true, channel: 'msedge', args: ['--enable-unsafe-webgpu'] },
+  { headless: false, channel: 'msedge', args: ['--enable-unsafe-webgpu'] },
   { headless: false, args: [] },
 ];
 
@@ -86,6 +91,7 @@ export async function launchWebGPU(): Promise<{ browser: Browser; recipe: Launch
 export interface LaasPageOptions {
   scene?: string;
   seed?: number;
+  terrain?: string;
   T?: number;
   cam?: string;
   preset?: string;
@@ -100,6 +106,7 @@ export function laasUrl(opts: LaasPageOptions, base = 'http://localhost:5173/'):
   const q = new URLSearchParams();
   if (opts.scene) q.set('scene', opts.scene);
   if (opts.seed !== undefined) q.set('seed', String(opts.seed));
+  if (opts.terrain) q.set('terrain', opts.terrain);
   if (opts.T !== undefined) q.set('T', String(opts.T));
   if (opts.cam) q.set('cam', opts.cam);
   if (opts.preset) q.set('preset', opts.preset);

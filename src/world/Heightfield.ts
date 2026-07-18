@@ -112,7 +112,7 @@ export class Heightfield {
     progress: ProgressFn,
   ): Promise<Heightfield> {
     const cfg = qualityConfig(params.preset);
-    const mp = makeMacroParams(seed);
+    const mp = makeMacroParams(seed, params.terrainRecipe);
 
     progress(0.04, `terrain: synthesizing ${cfg.heightRes}² heightfield`);
     const synth = await runHeightSynthesis(renderer, cfg.heightRes, mp);

@@ -122,6 +122,24 @@ feedback comes in chat; the two-frame test is the agent-side acceptance only.
       9 bookmarks, 90s flythrough, full battery, final two-frame test, self-score rubric.
 - [ ] **Tier 3** — only after battery passes (see spec §11).
 
+## Terrain recipe generator (2026-07-18)
+
+- Added data-driven anisotropic Gaussian terrain stamps with four recipes:
+  `laas` (regression control), `folded-ranges`, `rift-valley`, and
+  `caldera-lake`. Recipe jitter uses stable named seed streams.
+- Stamps feed macro synthesis before the existing valley carve, erosion,
+  hydrology, biome, vegetation, water, and CDLOD passes. `?terrain=ID` selects
+  a recipe; unknown values fall back to `laas`.
+- Added deterministic manifest and sequential WebGPU batch-render tools plus
+  strict tests and `docs/TERRAIN-GENERATOR.md` maintenance guidance.
+- VERIFIED on Windows/Edge WebGPU at `preset=low`, seed 1, shot 1: all three
+  generated recipes reached ready state and rendered screenshots. Observed
+  max heights: folded 2109 m, rift 1839 m, caldera 1877 m; no boot, water, or
+  camera-start failures. System Edge is now a launcher fallback when managed
+  Playwright Chromium is unavailable.
+- Next generator expansion: move biome-zone anchors and drainage splines into
+  recipe data; add automatic flooded-area, height-range, and GPU-cost gates.
+
 ## Current focus
 
 **Phase 2 — atmosphere, shadows, clouds, post** + USER FEEDBACK BATCH 1 (2026-06-11).
