@@ -1,6 +1,10 @@
 /** Top-level world recipes compose terrain-independent feature libraries. */
 
-export const WORLD_RECIPE_IDS = ['wilderness', 'magic-forest-ruins'] as const;
+export const WORLD_RECIPE_IDS = [
+  'wilderness',
+  'magic-forest-ruins',
+  'fantasy-city',
+] as const;
 
 export type WorldRecipeId = (typeof WORLD_RECIPE_IDS)[number];
 
@@ -35,6 +39,13 @@ const RECIPES: Readonly<Record<WorldRecipeId, WorldRecipe>> = {
     description: 'Mossed sanctuaries, broken watch circles, and luminous forest shrines.',
     features: [{ libraryId: 'magic-forest-ruins', recipeId: 'ancient-grove' }],
     environment: { timeOfDay: 16.7, fogDensity: 0.52, windStrength: 0.32 },
+  },
+  'fantasy-city': {
+    id: 'fantasy-city',
+    label: 'Procedural fantasy city',
+    description: 'A deterministic stone-and-timber merchant quarter built on suitable terrain.',
+    features: [{ libraryId: 'city-buildings', recipeId: 'fantasy-quarter' }],
+    environment: { timeOfDay: 14.4, fogDensity: 0.34, windStrength: 0.24 },
   },
 };
 

@@ -156,7 +156,7 @@ function usage(): string {
     '  --seeds 1..4,100',
     '  --shots 1,5,9',
     '  --preset low|high|ultra',
-    '  --world wilderness|magic-forest-ruins',
+    '  --world wilderness|magic-forest-ruins|fantasy-city',
     '  --time 11',
     '  --base-url http://localhost:5173/',
     '  --out generated/terrain-batch.json',

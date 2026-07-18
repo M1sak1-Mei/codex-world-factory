@@ -31,6 +31,7 @@ src/generation/
   models/
     ProceduralModelKit.ts       common discoverable model-kit contract
     magic-ruins/                geometry, materials, model constructors
+    city-buildings/             instanced architectural parts and palettes
   libraries/
     magic-forest-ruins/
       MagicForestRuinsLibrary.ts  composition root / dependency injection
@@ -39,6 +40,7 @@ src/generation/
         ...Planner.ts           terrain selection and occupancy
         ...Grammar.ts           pure model placements and collision segments
         ...SceneGenerator.ts    scene hierarchy, LOD, stats, and spawn
+    city-buildings/             terrain-aware district and building generator
 ```
 
 The layers have deliberately one-way dependencies:
@@ -83,6 +85,31 @@ instanced procedural geometry, distance-gated magic detail, procedural TSL
 materials, world-recipe environment defaults, an automatic walk spawn, useful
 HUD counters, and engine-agnostic 2D capsule collision.
 
+## City buildings V1
+
+Select the city through its top-level world recipe:
+
+```text
+http://localhost:5173/?world=fantasy-city&terrain=laas&seed=84&preset=low
+```
+
+The `fantasy-quarter` recipe plans a stone-and-timber merchant district. Its
+target layout is a three-by-three block skeleton containing one civic guildhall
+and up to 32 deterministic townhouses or towers. The planner scores altitude,
+slope, district relief, dry access, and the fraction of buildable lots.
+
+On regular terrain it emits the complete 33-building district. On extreme
+mountain or water-heavy terrain it chooses the best viable site and the pure
+grammar omits wet or excessively uneven plots. This keeps world boot robust
+while preserving seed determinism. Every accepted building emits a rectangular
+collision perimeter; the district publishes vegetation clearance, an entrance
+spawn, distance-gated architectural detail, and HUD counters.
+
+`CityBuildingsModelKit` renders foundations, plaster shells, steep roofs,
+timber framing, windows, and doors with instanced geometry. Planning and grammar
+only exchange data records, so future elven, dwarven, port, or imported-asset
+model kits can replace the visual layer without changing terrain selection.
+
 ## Determinism rules
 
 1. Derive an RNG from a stable semantic path, such as
@@ -113,26 +140,28 @@ HUD counters, and engine-agnostic 2D capsule collision.
    least two real WebGPU captures using different seeds or terrain recipes.
 9. Verify the legacy `wilderness` recipe remains unchanged.
 
-The intended next reusable modules are path/road graphs, plot and footprint
-allocation, modular building grammar, interior/door connectors, prop sockets,
-and biome-aware dressing. They should depend on the contracts above rather
-than importing the magic-ruins implementation.
+The intended next reusable modules are path/road graphs, cross-district plot
+allocation, interior/door connectors, prop sockets, and biome-aware dressing.
+They should depend on the contracts above rather than importing either concrete
+content library.
 
 ## Commands
 
 ```text
 npm run test:world
+npm run test:city
 npm run build
 npm run shoot -- --world magic-forest-ruins --terrain laas --seed 42 --preset low
+npm run shoot -- --world fantasy-city --terrain laas --seed 84 --preset low
 npm run terrain:batch -- --world magic-forest-ruins --recipes laas,folded-ranges --seeds 1-3
 npm run terrain:shoot -- --manifest outputs/terrain-batch/manifest.json
 ```
 
 ## Current boundary
 
-This milestone is the first maintainable library and factory foundation, not
-the completed fantasy-world catalogue. Collision is horizontal walk collision;
-there is not yet a navmesh, multi-floor interior solver, quest graph, or road
-network. The block grammar is intentionally procedural and asset-free, so a
-future art pass can add reusable arches, roofs, doors, trim, and facade kits
+This milestone contains two maintainable libraries and a factory foundation,
+not the completed fantasy-world catalogue. Collision is horizontal walk
+collision; there is not yet a navmesh, multi-floor interior solver, quest graph,
+or road network. The city grammar is intentionally procedural and asset-free,
+so a future art pass can add reusable arches, balconies, trim, and facade kits
 without changing site planning or world composition.

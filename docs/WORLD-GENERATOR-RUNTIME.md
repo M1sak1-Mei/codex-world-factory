@@ -1,7 +1,8 @@
 # World generator runtime
 
-This document follows one boot of
-`?world=magic-forest-ruins&terrain=laas&seed=42` from URL to rendered scene.
+This document follows one boot of a feature-backed world, such as
+`?world=magic-forest-ruins&terrain=laas&seed=42` or
+`?world=fantasy-city&terrain=laas&seed=84`, from URL to rendered scene.
 
 ## Boot pipeline
 
@@ -37,15 +38,22 @@ Terrain and feature generators use stable semantic RNG paths. A ruin site uses
 for the placement grammar. This prevents a future road, building, or prop
 library from moving existing ruins merely because it was registered earlier.
 
-Generation is boot-time work. Per frame, the ruins runtime only compares site
-distance with the camera to update visibility; it does not re-plan terrain,
-re-run the grammar, or rebuild instances.
+The city library follows the same boundary with
+`feature/city-buildings/fantasy-quarter/district-N`. Its planner can degrade to
+the best viable mountain site, and its grammar omits wet or excessively uneven
+plots without changing any other library's random stream.
+
+Generation is boot-time work. Per frame, feature runtimes only compare site or
+district distance with the camera to update visibility; they do not re-plan
+terrain, re-run the grammar, or rebuild instances.
 
 ## Extension points
 
 - Add a visual variant by implementing `MagicRuinsModelKit` and injecting its
   factory into `createMagicForestRuinsLibrary`.
 - Add a new ruin layout by extending recipe data and the pure grammar.
-- Add a new content family, such as buildings, through its own model kit and
-  feature library while reusing the registry, terrain, occupancy, spawn,
-  collision, stats, and runtime contracts.
+- Add a city visual family by implementing `CityBuildingsModelKit` and
+  injecting its factory into `createCityBuildingsLibrary`.
+- Add a new content family, such as roads, through its own model kit and feature
+  library while reusing the registry, terrain, occupancy, spawn, collision,
+  stats, and runtime contracts.

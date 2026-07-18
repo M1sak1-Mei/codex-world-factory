@@ -6,8 +6,8 @@ three.js `WebGPURenderer`、TSL 和原生 WGSL compute 为基础，通过可复�
 开放世界。
 
 项目当前重点不是制作单个固定关卡，而是建立一套可以持续扩展的生成框架：
-后续加入建筑、道路、村庄、城堡、地下城入口和任务地标时，不需要重写地形、
-植被或已有遗迹。
+后续扩展建筑风格、道路、村庄、城堡、地下城入口和任务地标时，不需要重写
+地形、植被或已有内容库。
 
 > 当前版本：严格 TypeScript、WebGPU only、无 WebGL fallback。相同的
 > `seed + terrain + world` 会生成相同的世界布局。
@@ -37,6 +37,20 @@ http://localhost:5173/?world=magic-forest-ruins&terrain=laas&seed=42&preset=low
 
 一次验证样例（`seed=42`、`terrain=laas`）生成 3 个遗迹点、847 块程序化
 石材、40 根魔法水晶和 2 个传送门。具体数量由配方和 seed 决定。
+
+### 程序化奇幻城市 `fantasy-city`
+
+在干燥、低坡度、低起伏的地形上选址，生成一个石基、灰泥墙和木构框架组成的
+商贸街区。当前配方包含中心公会大厅、住宅、塔楼、暖色窗户和木门，并提前输出
+植被清除区、城市入口、出生点、建筑碰撞边界、LOD 与运行时统计。
+
+```text
+http://localhost:5173/?world=fantasy-city&terrain=laas&seed=84&preset=low
+```
+
+默认 `fantasy-quarter` 配方以一个 3×3 街区骨架为目标：中心 1 栋公会大厅，
+外围最多 32 栋确定性住宅或塔楼。楼层、尺寸、朝向、立面色板和塔楼分布由独立
+seed stream 决定；极端山地或涉水地块会被跳过，让城市降级生成而不是启动失败。
 
 ## 世界生成逻辑
 
@@ -162,6 +176,7 @@ GPU clustered-Poisson scatter 和跟随相机的 `GroundRing` 都消费同一份
 |---|---|
 | `wilderness` | 纯地形、水文和生态；未知 `world` 参数的安全回退。 |
 | `magic-forest-ruins` | 古树林遗迹库，默认黄昏环境和较低风力。 |
+| `fantasy-city` | 石木商贸街区，目标 33 栋建筑，包含地形降级、碰撞、LOD 和专属环境。 |
 
 ### 魔法遗迹模型目录
 
@@ -171,6 +186,17 @@ GPU clustered-Poisson scatter 和跟随相机的 `GroundRing` 都消费同一份
 | `magic-ruins/crystal-spire` | prop | 是 |
 | `magic-ruins/portal-ring` | effect | 否 |
 | `magic-ruins/lichen-colony` | ground-cover | 否 |
+
+### 城市建筑模型目录
+
+| Model ID | 分类 | 实例化 |
+|---|---|---|
+| `city-buildings/stone-foundation` | structure | 是 |
+| `city-buildings/plaster-shell` | structure | 是 |
+| `city-buildings/steep-roof` | structure | 是 |
+| `city-buildings/timber-frame` | structure | 是 |
+| `city-buildings/lit-window` | prop | 是 |
+| `city-buildings/wooden-door` | prop | 是 |
 
 ### 引擎与世界系统
 
@@ -185,7 +211,7 @@ GPU clustered-Poisson scatter 和跟随相机的 `GroundRing` 都消费同一份
 | Motion | 分层风场、云层运动和 131,072 GPU 粒子。 |
 | Post | TAA、bloom、自动曝光和按时间变化的色彩分级。 |
 | Exploration | 行走、重力、跳跃、冲刺、自由飞行、书签和 flythrough。 |
-| Fantasy generation | WorldRecipe、feature registry、占地排除、模型包、魔法森林遗迹。 |
+| Fantasy generation | WorldRecipe、feature registry、占地排除、模型包、魔法森林遗迹和城市建筑。 |
 | Tooling | WebGPU 截图、像素采样、帧对齐 diff、批量地形渲染和统计采集。 |
 
 ## 本地运行
@@ -221,6 +247,9 @@ http://localhost:5173/?world=magic-forest-ruins&terrain=laas&seed=42&preset=low
 
 # 折叠山脉上的魔法遗迹
 http://localhost:5173/?world=magic-forest-ruins&terrain=folded-ranges&seed=7&preset=low
+
+# 程序化奇幻城市
+http://localhost:5173/?world=fantasy-city&terrain=laas&seed=84&preset=low
 ```
 
 ### URL 参数
@@ -313,21 +342,25 @@ codex-world-demo/
 └─ package.json
 ```
 
-### 魔法遗迹内部边界
+### 内容库内部边界
 
 ```text
 src/generation/
-├─ models/magic-ruins/
-│  ├─ MagicRuinsModelKit.ts         几何和模型实例化
-│  └─ MagicRuinsMaterials.ts        TSL 材质
-└─ libraries/magic-forest-ruins/
-   ├─ MagicForestRuinsLibrary.ts    组合根 / 依赖注入
-   └─ generator/
-      ├─ MagicForestRuinsRecipe.ts  数据配方
-      ├─ MagicForestRuinsPlanner.ts 地形选址和占地排除
-      ├─ MagicForestRuinsLayout.ts  共享布局语义
-      ├─ MagicForestRuinsGrammar.ts 纯放置语法
-      └─ MagicForestRuinsSceneGenerator.ts 场景、LOD、统计和出生点
+├─ models/
+│  ├─ magic-ruins/                  遗迹几何、实例和 TSL 材质
+│  └─ city-buildings/               建筑部件、实例和建筑色板
+└─ libraries/
+   ├─ magic-forest-ruins/
+   │  ├─ MagicForestRuinsLibrary.ts 组合根 / 依赖注入
+   │  └─ generator/                 recipe、planner、layout、grammar、scene
+   └─ city-buildings/
+      ├─ CityBuildingsLibrary.ts    城市库组合根 / 依赖注入
+      └─ generator/
+         ├─ CityBuildingsRecipe.ts  城市配方和选址约束
+         ├─ CityBuildingsPlanner.ts 城区选址、入口和占地排除
+         ├─ CityBuildingsLayout.ts  街区尺寸和共享布局语义
+         ├─ CityBuildingsGrammar.ts 地块到建筑部件的纯数据展开
+         └─ CityBuildingsSceneGenerator.ts 场景、LOD、统计和出生点
 ```
 
 ## 开发新模块
@@ -375,12 +408,12 @@ src/generation/
 ### 建议的新内容顺序
 
 1. 道路/路径 graph。
-2. 地块和建筑 footprint allocator。
-3. facade、拱门、屋顶、门窗等建筑 model kit。
-4. 建筑 grammar 与 prop sockets。
-5. 村庄/城镇布局和道路连接。
-6. interior/door connectors 与 navmesh。
-7. 地下城入口、任务地标和世界级依赖图。
+2. 跨街区 plot allocator 与道路连接器。
+3. 拱门、阳台、檐口和 prop sockets。
+4. 精灵、矮人、港口等建筑配方和 model kit 变体。
+5. 村庄/多街区 composition。
+6. 城堡、桥梁和地下城入口。
+7. 室内、任务图、事件和 AI 导航。
 
 ## 代码规范
 
@@ -433,6 +466,7 @@ src/generation/
 | `npm run dev` | 启动 Vite 开发服务器。 |
 | `npm run typecheck` | 严格 TypeScript 检查。 |
 | `npm run test:terrain` | 地形配方确定性测试。 |
+| `npm run test:city` | 城市选址、语法、模型库和运行时测试。 |
 | `npm run test:world` | 地形与世界内容库测试。 |
 | `npm run build` | 类型检查并生成 production build。 |
 | `npm run preview` | 预览 `dist/`。 |
@@ -459,7 +493,7 @@ npm run terrain:shoot -- --manifest generated/terrain-batch.json
 
 ## 场景与生成产物的入库策略
 
-两个已有场景的 recipe、planner、grammar、model kit 和运行时代码都在 Git 中，
+已有场景的 recipe、planner、grammar、model kit 和运行时代码都在 Git 中，
 因此场景本身已经被版本控制。仓库同时保留每个主要场景的一张代表预览图，方便
 快速审查视觉变化。
 
@@ -483,23 +517,23 @@ GitHub Release 或外部对象存储。这样源码仓库保持轻量，历史�
 
 ## 当前边界与路线图
 
-当前版本已经具备地形工厂、完整自然生态和第一个可维护的奇幻内容库，但还没有：
+当前版本已经具备地形工厂、完整自然生态、魔法遗迹库和第一版城市建筑库，但还没有：
 
 - 道路和桥梁 graph。
-- 通用建筑 facade/roof/door grammar。
-- 城镇级 plot allocation。
+- 跨街区道路连接与城镇级 plot allocation。
+- 可组合的拱门、阳台、檐口和建筑 prop sockets。
 - 多楼层室内求解器。
 - navmesh 和 AI 寻路。
 - 任务图、世界事件和跨场景依赖。
 
-近期目标是先完成模块化建筑基础，再连接道路、村庄和大型奇幻地标，最终形成可
-批量生成的完整程序化奇幻世界工厂。
+近期目标是把当前建筑街区连接到道路和多街区规划，再扩展村庄、建筑风格与大型
+奇幻地标，最终形成可批量生成的完整程序化奇幻世界工厂。
 
 ## 来源与维护
 
 项目起源于开源仓库 `Braffolk/fable5-world-demo`，保留原始 Git 历史、
 `PROJECT_LAAS_v2.md` 技术基线和相应归属。当前 fork 由 Codex World Factory
-方向继续维护，新增 Gaussian 地形配方、世界内容库框架、模型包边界和魔法森林
-遗迹生成器。
+方向继续维护，新增 Gaussian 地形配方、世界内容库框架、模型包边界、魔法森林
+遗迹生成器和程序化城市建筑库。
 
 许可信息见 [LICENSE](LICENSE)。
