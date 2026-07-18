@@ -1,9 +1,9 @@
 {
-  "name": "laas",
+  "name": "codex-world-factory",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "PROJECT LAAS — fully procedural open world in the browser (WebGPU)",
+  "description": "Codex World Factory - a modular procedural fantasy world in the browser (WebGPU)",
   "scripts": {
     "dev": "vite --port 5173 --strictPort",
     "build": "tsc --noEmit && vite build",
