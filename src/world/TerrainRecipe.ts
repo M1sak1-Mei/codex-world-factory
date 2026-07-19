@@ -14,6 +14,10 @@ export const TERRAIN_RECIPE_IDS = [
   'folded-ranges',
   'rift-valley',
   'caldera-lake',
+  'rolling-lowlands',
+  'basin-country',
+  'desert-mesas',
+  'glacial-uplands',
 ] as const;
 
 export type TerrainRecipeId = (typeof TERRAIN_RECIPE_IDS)[number];
@@ -197,11 +201,107 @@ const CALDERA_LAKE: TerrainRecipe = {
   ],
 };
 
+const ROLLING_LOWLANDS: TerrainRecipe = {
+  id: 'rolling-lowlands',
+  label: 'Rolling lowlands',
+  description: 'Long gentle swells, shallow hollows, and open low country for forests and farmland.',
+  stamps: [
+    {
+      id: 'west-swell', center: [-850, 250], sigma: [1100, 650], rotation: 0.35,
+      amplitude: 105, sharpness: 0.72, hardness: -0.04,
+      centerJitter: 140, rotationJitter: 0.18, amplitudeJitter: 0.18,
+    },
+    {
+      id: 'east-swell', center: [920, -120], sigma: [1250, 520], rotation: -0.42,
+      amplitude: 92, sharpness: 0.78, hardness: -0.03,
+      centerJitter: 150, rotationJitter: 0.2, amplitudeJitter: 0.2,
+    },
+    {
+      id: 'central-hollow', center: [60, 260], sigma: [720, 600], rotation: 0,
+      amplitude: -58, sharpness: 0.8, hardness: -0.08,
+      centerJitter: 100, amplitudeJitter: 0.16,
+    },
+  ],
+};
+
+const BASIN_COUNTRY: TerrainRecipe = {
+  id: 'basin-country',
+  label: 'Basin country',
+  description: 'A broad inhabited basin ringed by asymmetric uplands and drainage saddles.',
+  stamps: [
+    {
+      id: 'main-basin', center: [80, 120], sigma: [1050, 850], rotation: 0.18,
+      amplitude: -145, sharpness: 0.82, hardness: -0.15,
+      centerJitter: 90, rotationJitter: 0.1, amplitudeJitter: 0.1,
+    },
+    {
+      id: 'north-rim', center: [-120, -1120], sigma: [1500, 310], rotation: 0.04,
+      amplitude: 245, sharpness: 0.92, hardness: 0.14,
+      centerJitter: 130, rotationJitter: 0.1, amplitudeJitter: 0.14,
+    },
+    {
+      id: 'east-rim', center: [1260, 280], sigma: [960, 300], rotation: 1.35,
+      amplitude: 210, sharpness: 0.95, hardness: 0.12,
+      centerJitter: 120, rotationJitter: 0.1, amplitudeJitter: 0.14,
+    },
+  ],
+};
+
+const DESERT_MESAS: TerrainRecipe = {
+  id: 'desert-mesas',
+  label: 'Desert mesas',
+  description: 'Separated hard tablelands rise above a broad dry plain.',
+  stamps: [
+    {
+      id: 'west-mesa', center: [-920, 180], sigma: [520, 360], rotation: 0.25,
+      amplitude: 315, sharpness: 1.7, hardness: 0.32,
+      centerJitter: 120, rotationJitter: 0.2, amplitudeJitter: 0.15,
+    },
+    {
+      id: 'east-mesa', center: [860, -420], sigma: [650, 330], rotation: -0.4,
+      amplitude: 360, sharpness: 1.85, hardness: 0.36,
+      centerJitter: 130, rotationJitter: 0.2, amplitudeJitter: 0.16,
+    },
+    {
+      id: 'south-butte', center: [220, 1110], sigma: [300, 260], rotation: 0.1,
+      amplitude: 270, sharpness: 2.1, hardness: 0.3,
+      centerJitter: 90, rotationJitter: 0.3, amplitudeJitter: 0.18,
+    },
+  ],
+};
+
+const GLACIAL_UPLANDS: TerrainRecipe = {
+  id: 'glacial-uplands',
+  label: 'Glacial uplands',
+  description: 'High shoulders and a long scooped trough create a snow-country composition.',
+  stamps: [
+    {
+      id: 'upland-mass', center: [180, -260], sigma: [1450, 1100], rotation: -0.2,
+      amplitude: 430, sharpness: 0.72, hardness: 0.2,
+      centerJitter: 120, rotationJitter: 0.12, amplitudeJitter: 0.12,
+    },
+    {
+      id: 'glacial-trough', center: [-180, 80], sigma: [1500, 260], rotation: 2.32,
+      amplitude: -240, sharpness: 0.9, hardness: -0.16,
+      centerJitter: 80, rotationJitter: 0.06, amplitudeJitter: 0.1,
+    },
+    {
+      id: 'cirque', center: [780, -860], sigma: [430, 390], rotation: 0,
+      amplitude: -190, sharpness: 1.25, hardness: -0.12,
+      centerJitter: 75, amplitudeJitter: 0.12,
+    },
+  ],
+};
+
 const RECIPES: Readonly<Record<TerrainRecipeId, TerrainRecipe>> = {
   laas: LAAS,
   'folded-ranges': FOLDED_RANGES,
   'rift-valley': RIFT_VALLEY,
   'caldera-lake': CALDERA_LAKE,
+  'rolling-lowlands': ROLLING_LOWLANDS,
+  'basin-country': BASIN_COUNTRY,
+  'desert-mesas': DESERT_MESAS,
+  'glacial-uplands': GLACIAL_UPLANDS,
 };
 
 export function isTerrainRecipeId(value: string): value is TerrainRecipeId {

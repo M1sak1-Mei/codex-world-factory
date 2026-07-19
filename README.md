@@ -169,6 +169,10 @@ GPU clustered-Poisson scatter 和跟随相机的 `GroundRing` 都消费同一份
 | `folded-ranges` | 三条错位的长山褶皱与庇护谷地。 |
 | `rift-valley` | 对角裂谷、低谷底和两侧硬质山肩。 |
 | `caldera-lake` | 嵌套 Gaussian 火山口、内部湖盆和西南缺口。 |
+| `rolling-lowlands` | 长缓坡、浅洼地和适合森林/农田的低地。 |
+| `basin-country` | 被不对称高地环绕的开阔盆地。 |
+| `desert-mesas` | 干旱平原上的硬质台地与孤峰。 |
+| `glacial-uplands` | 高地肩部、冰川槽谷和雪地构图。 |
 
 ### 顶层世界配方
 
@@ -203,7 +207,7 @@ GPU clustered-Poisson scatter 和跟随相机的 `GroundRing` 都消费同一份
 | 模块 | 当前能力 |
 |---|---|
 | Terrain | 高度场、Gaussian stamps、侵蚀、水文、河流、湖泊、生物群系、积雪、CDLOD。 |
-| Vegetation | 6 类树木、程序化枝干与树冠、灌木、蕨类、花、倒木、草地和地面碎屑。 |
+| Vegetation | 8 类树木、程序化枝干与树冠、3 类灌木、蕨类、3 类花、倒木、草地和地面碎屑。 |
 | GPU scatter | clustered-Poisson 分布、分层排除、GPU culling、间接绘制和 LOD ring。 |
 | Lighting | 四级 CSM、PCSS、接触阴影、terrain-relative irradiance probes、GTAO。 |
 | Atmosphere | Hillaire LUT 大气、体积云、云影、雾和林冠光束。 |
@@ -258,6 +262,9 @@ http://localhost:5173/?world=fantasy-city&terrain=laas&seed=84&preset=low
 |---|---|---|
 | `seed` | `42` | 世界主种子。 |
 | `terrain` | `folded-ranges` | 地形配方。 |
+| `landscape` | `balanced` / `wild` / `settled` / `arid` / `alpine` / `legacy` | 地貌、生态和地表预设。 |
+| `include` | `plains,forest,flowers,cobble` | 强制启用的景观标签，逗号分隔。 |
+| `exclude` | `desert,snow,concrete` | 禁止生成的景观标签；优先级最高。 |
 | `world` | `magic-forest-ruins` | 顶层世界内容组合。 |
 | `preset` | `low` / `high` / `ultra` | 质量配置。 |
 | `T` | `16.7` | 时间，单位为小时。 |
@@ -466,6 +473,7 @@ src/generation/
 | `npm run dev` | 启动 Vite 开发服务器。 |
 | `npm run typecheck` | 严格 TypeScript 检查。 |
 | `npm run test:terrain` | 地形配方确定性测试。 |
+| `npm run test:landscape` | 景观解析、包含/排除优先级、地表布局和物种目录测试。 |
 | `npm run test:city` | 城市选址、语法、模型库和运行时测试。 |
 | `npm run test:world` | 地形与世界内容库测试。 |
 | `npm run build` | 类型检查并生成 production build。 |
@@ -482,6 +490,9 @@ src/generation/
 npm run terrain:batch -- \
   --world magic-forest-ruins \
   --recipes laas,folded-ranges \
+  --landscape balanced \
+  --include forest,grass,flowers,cobble \
+  --exclude desert,concrete \
   --seeds 1..3 \
   --shots 1,5,9 \
   --preset low
@@ -528,6 +539,78 @@ GitHub Release 或外部对象存储。这样源码仓库保持轻量，历史�
 
 近期目标是把当前建筑街区连接到道路和多街区规划，再扩展村庄、建筑风格与大型
 奇幻地标，最终形成可批量生成的完整程序化奇幻世界工厂。
+
+## 可控景观配方（Landscape Profile）
+
+地形现在由四个互相独立、可以自由组合的输入维度决定：
+
+```text
+World = Seed × TerrainRecipe × LandscapeProfile × WorldRecipe
+```
+
+- `seed` 决定可复现的变化。
+- `terrain` 决定宏观构图，例如山脉、裂谷、盆地或冰川高地。
+- `landscape` 决定地貌强度、生态密度和地表类型。
+- `world` 决定遗迹、城市建筑等放置在地形之上的内容库。
+
+`landscape` 首先选择一个预设，然后应用 `include` 和 `exclude`。排除项最后执行，
+因此“不要什么”永远优先于预设和“需要什么”。未知标签会被忽略，重复标签会自动去重。
+
+```text
+# 丰富的默认森林：丘陵、平原、盆地、花草和少量铺装
+http://localhost:5173/?terrain=laas&landscape=balanced&seed=42&preset=low
+
+# 明确要求低地、森林、花和石板路，同时禁止沙漠、雪和水泥地
+http://localhost:5173/?terrain=rolling-lowlands&landscape=balanced&include=plains,basins,forest,grass,flowers,cobble&exclude=desert,snow,concrete&seed=42&preset=low
+
+# 沙漠台地，不生成森林、雪地、花和人工地坪
+http://localhost:5173/?terrain=desert-mesas&landscape=arid&include=desert&exclude=forest,snow,flowers,cobble,concrete&seed=17&preset=low
+
+# 冰川雪原和高山
+http://localhost:5173/?terrain=glacial-uplands&landscape=alpine&include=mountains,snow&exclude=desert,concrete&seed=9&preset=low
+
+# 完全复现升级前的自然地形参数
+http://localhost:5173/?terrain=laas&landscape=legacy&seed=42&preset=low
+```
+
+### 景观预设
+
+| ID | 主要用途 |
+|---|---|
+| `legacy` | 保留升级前的噪声、生态和无人工地表行为，作为视觉回归基线。 |
+| `balanced` | 新默认值；森林、草甸、丘陵、平原、盆地和少量沙地/铺装混合。 |
+| `wild` | 更强地形起伏、扭曲、森林和灌木，关闭人工铺装。 |
+| `settled` | 更平缓、更开阔，增加草地、花、石板路和水泥地坪，适合城镇。 |
+| `arid` | 干旱、低植被、高沙地权重，适合荒漠和台地。 |
+| `alpine` | 更强山体、岩石细节和积雪，减少平原和低地植被。 |
+
+### 可包含/排除的标签
+
+| 类别 | 标签 |
+|---|---|
+| 地貌 | `mountains`, `hills`, `plains`, `basins` |
+| 生态 | `forest`, `meadow`, `wetland`, `desert`, `snow` |
+| 地表覆盖 | `grass`, `shrubs`, `flowers` |
+| 人工/特殊地表 | `cobble`, `concrete`；沙地由 `desert` 同时开启 |
+
+### 新增地形与生态能力
+
+- 地形配方增加 `rolling-lowlands`、`basin-country`、`desert-mesas`、
+  `glacial-uplands`；连同原有配方共 8 种宏观构图。
+- 高度场噪声现在分别暴露宏观尺度、丘陵、平原、盆地、山体、微细节和河谷扭曲强度，
+  预设只提供默认值，不再把这些强度散落写死在不同 pass 中。
+- 地表分类新增独立 `surfaceTex`：R/G/B/A 分别表示沙地、石板路、水泥地和任意人工地面。
+  地形材质、微位移、树木散布、灌木/花散布和相机周围草地共同消费这张纹理，
+  所以道路不会重新长满树草，水泥地也不会继承岩石微位移。
+- 树木目录由 6 种扩展到 8 种：云杉、松树、山毛榉、白桦、喀斯特曲木、枯立木、
+  古橡树和河岸柳树。现有榛树灌木、粉花灌木、杜松、蕨类、伞形花、铃形花和雏菊继续保留，
+  且草、灌木、花可以分别包含或排除。
+- 人工地表布局是基于命名 seed stream 生成的普通数据结构；未来道路 graph、城市街区和遗迹模块
+  可以注入同一种 path/pad primitive，不需要改写地形材质。
+
+调试地表分类时可使用 `?view=sand`、`?view=cobble`、`?view=concrete` 和
+`?view=artificial`。景观配方测试命令为 `npm run test:landscape`，完整回归仍使用
+`npm run test:world` 和 `npm run build`。
 
 ## 来源与维护
 

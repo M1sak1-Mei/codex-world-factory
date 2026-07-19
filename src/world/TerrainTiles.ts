@@ -151,6 +151,7 @@ export class TerrainTiles {
     const nsV = texture(hf.normalTex, uvV, 0);
     const bioV = hf.biomeTex ? texture(hf.biomeTex, uvV, 0) : vec4(0, 0, 0, 0);
     const fldV = hf.fieldsTex ? texture(hf.fieldsTex, uvV, 0) : vec4(0, 0, 0, 0);
+    const surfV = hf.surfaceTex ? texture(hf.surfaceTex, uvV, 0) : vec4(0, 0, 0, 0);
     const rockK = smoothstep(DISP.slopeKnee0, DISP.slopeKnee1, nsV.w).max(
       bioV.a.mul(0.85),
     );
@@ -160,6 +161,7 @@ export class TerrainTiles {
     const dispAmp = mix(float(DISP.base), float(DISP.rock), rockK)
       .max(gravelK)
       .mul(bioV.g.mul(0.75).oneMinus())
+      .mul(surfV.a.mul(0.96).oneMinus())
       .mul(clamp(float(DISP.fade1).sub(camD).div(DISP.fade1 - DISP.fade0), 0, 1));
     const noiseA = hf.noiseA as NonNullable<typeof hf.noiseA>;
     const noiseB = hf.noiseB as NonNullable<typeof hf.noiseB>;
@@ -192,6 +194,7 @@ export class TerrainTiles {
       normalTex: hf.normalTex,
       biomeTex: hf.biomeTex as NonNullable<typeof hf.biomeTex>,
       fieldsTex: hf.fieldsTex as NonNullable<typeof hf.fieldsTex>,
+      surfaceTex: hf.surfaceTex as NonNullable<typeof hf.surfaceTex>,
       noiseA: hf.noiseA as NonNullable<typeof hf.noiseA>,
       noiseB: hf.noiseB as NonNullable<typeof hf.noiseB>,
       mp: hf.mp,
@@ -297,6 +300,24 @@ export class TerrainTiles {
       const ch = debugView === 'bioR' ? b.r : debugView === 'bioB' ? b.b : b.g;
       mat.emissiveNode = vec3(ch);
     }
+    if (
+      (debugView === 'sand' ||
+        debugView === 'cobble' ||
+        debugView === 'concrete' ||
+        debugView === 'artificial') &&
+      hf.surfaceTex
+    ) {
+      const srf = texture(hf.surfaceTex, positionWorld.xz.div(WORLD_SIZE).add(0.5));
+      mat.colorNode = vec3(0.02);
+      const ch = debugView === 'sand'
+        ? srf.r
+        : debugView === 'cobble'
+          ? srf.g
+          : debugView === 'concrete'
+            ? srf.b
+            : srf.a;
+      mat.emissiveNode = vec3(ch);
+    }
     if (opts.neutral) {
       // neutral clay shading for the erosion split view: fragment-space
       // finite-difference normals from the bound height buffer
@@ -361,6 +382,7 @@ export class TerrainTiles {
       normalTex: hf.normalTex,
       biomeTex: hf.biomeTex as NonNullable<typeof hf.biomeTex>,
       fieldsTex: hf.fieldsTex as NonNullable<typeof hf.fieldsTex>,
+      surfaceTex: hf.surfaceTex as NonNullable<typeof hf.surfaceTex>,
       noiseA: hf.noiseA as NonNullable<typeof hf.noiseA>,
       noiseB: hf.noiseB as NonNullable<typeof hf.noiseB>,
       mp: hf.mp,

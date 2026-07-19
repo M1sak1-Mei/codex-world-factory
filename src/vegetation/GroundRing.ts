@@ -446,6 +446,11 @@ export class GroundRing {
         uvW,
         0,
       ) as unknown as NV4;
+      const surf = texture(
+        hf.surfaceTex as NonNullable<typeof hf.surfaceTex>,
+        uvW,
+        0,
+      ) as unknown as NV4;
       const ns = texture(hf.normalTex, uvW, 0) as unknown as NV4;
       const bioId = bio.x.mul(8).add(0.5).floor().toInt();
       const h = hf.sampleHeight(wpos);
@@ -479,7 +484,10 @@ export class GroundRing {
       );
       dens = dens
         .mul(float(1).sub(bio.y.mul(0.95)))
-        .mul(float(1).sub(smoothstep(0.55, 0.95, ns.w)));
+        .mul(float(1).sub(smoothstep(0.55, 0.95, ns.w)))
+        .mul(hf.mp.landscape.ecology.grass)
+        .mul(surf.r.mul(0.94).oneMinus())
+        .mul(surf.a.mul(0.99).oneMinus());
       // coverage-conserving continuous LOD ("cheap nanite for aggregates"):
       // accept thins SMOOTHLY with distance — survivors widen by 1/sqrt(thin)
       // in the vertex stage, so screen coverage stays constant and there are
@@ -542,6 +550,11 @@ export class GroundRing {
         uvW,
         0,
       ) as unknown as NV4;
+      const surf = texture(
+        hf.surfaceTex as NonNullable<typeof hf.surfaceTex>,
+        uvW,
+        0,
+      ) as unknown as NV4;
       const ns = texture(hf.normalTex, uvW, 0) as unknown as NV4;
       const bioId = bio.x.mul(8).add(0.5).floor().toInt();
       const h = hf.sampleHeight(wpos);
@@ -549,6 +562,9 @@ export class GroundRing {
       // runs over them) — only drop debris under genuinely deep water
       const submergedBy = hf.sampleWaterYNearest(wpos).sub(h);
       If(submergedBy.greaterThan(0.55), () => {
+        Return();
+      });
+      If(surf.a.greaterThan(0.12), () => {
         Return();
       });
       const canopy = canopyAt(canopyTex, wpos);
@@ -637,6 +653,11 @@ export class GroundRing {
         uvW,
         0,
       ) as unknown as NV4;
+      const surf = texture(
+        hf.surfaceTex as NonNullable<typeof hf.surfaceTex>,
+        uvW,
+        0,
+      ) as unknown as NV4;
       const ns = texture(hf.normalTex, uvW, 0) as unknown as NV4;
       const bioId = bio.x.mul(8).add(0.5).floor().toInt();
       const h = hf.sampleHeight(wpos);
@@ -654,7 +675,10 @@ export class GroundRing {
         .mul(float(1).sub(bio.w.mul(0.55)))
         .mul(float(1).sub(canopy.mul(0.45)))
         .mul(float(1).sub(bio.y.mul(0.95)))
-        .mul(float(1).sub(smoothstep(0.55, 0.95, ns.w)));
+        .mul(float(1).sub(smoothstep(0.55, 0.95, ns.w)))
+        .mul(hf.mp.landscape.ecology.grass)
+        .mul(surf.r.mul(0.94).oneMinus())
+        .mul(surf.a.mul(0.99).oneMinus());
       // ramp IN over the fine band's dissolve, OUT at the splat handoff
       const fadeIn = smoothstep(FAR_R0 - 16, FAR_R0 + 14, dist);
       const edge = float(1).sub(smoothstep(FAR_R * 0.93, FAR_R, dist));

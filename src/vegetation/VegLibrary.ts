@@ -78,6 +78,8 @@ export const HERO_DIETS: Record<string, HeroDiet> = {
   birch: { meshAnchorTarget: 4000, barkK: 1 },
   karst: { meshAnchorTarget: 4000, barkK: 1.1 },
   snag: { barkK: 1.3 },
+  oak: { meshAnchorTarget: 2200, barkK: 0.55 },
+  willow: { meshAnchorTarget: 3200, barkK: 0.9 },
 };
 
 export interface VegLib {

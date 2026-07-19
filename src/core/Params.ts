@@ -2,6 +2,12 @@
 
 import { parseTerrainRecipeId, type TerrainRecipeId } from '../world/TerrainRecipe';
 import {
+  parseLandscapeProfileId,
+  parseLandscapeTags,
+  type LandscapeProfileId,
+  type LandscapeTag,
+} from '../world/LandscapeProfile';
+import {
   parseWorldRecipeId,
   worldRecipe,
   type WorldRecipeId,
@@ -20,6 +26,12 @@ export interface LaasParams {
   preset: QualityPreset;
   /** art-directed Gaussian terrain recipe layered into macro synthesis */
   terrainRecipe: TerrainRecipeId;
+  /** declarative landscape preset shared by terrain, ecology, and surfaces */
+  landscapeProfile: LandscapeProfileId;
+  /** features explicitly requested by the scene author */
+  landscapeInclude: LandscapeTag[];
+  /** features explicitly forbidden by the scene author; exclusions win */
+  landscapeExclude: LandscapeTag[];
   /** composition of procedural feature libraries placed on the terrain */
   worldRecipe: WorldRecipeId;
   /** HUD visible at boot */
@@ -56,6 +68,9 @@ export function parseParams(search: string = window.location.search): LaasParams
     ),
     preset,
     terrainRecipe: parseTerrainRecipeId(q.get('terrain')),
+    landscapeProfile: parseLandscapeProfileId(q.get('landscape')),
+    landscapeInclude: parseLandscapeTags(q.get('include')),
+    landscapeExclude: parseLandscapeTags(q.get('exclude')),
     worldRecipe: worldRecipeId,
     // full debug panel hidden by default — F3 toggles it (fps chip always on)
     hud: q.get('hud') === '1',

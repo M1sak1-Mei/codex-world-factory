@@ -58,6 +58,8 @@ export const enum VegClass {
   Birch = 3,
   KarstGnarl = 4,
   Snag = 5,
+  Oak = 6,
+  Willow = 7,
   // understory
   BushHazel = 8,
   BushPink = 9,
@@ -161,8 +163,9 @@ export function cellHash(cell: NV2, salt: number): NF {
 
 /** per-biome value tables → TSL select chain (biome ids 0..5) */
 function byBiome(bioId: NI, vals: readonly number[]): NF {
-  let e: NF = float(vals[5] ?? 0);
-  for (let b = 4; b >= 0; b--) {
+  const last = Math.max(0, vals.length - 1);
+  let e: NF = float(vals[last] ?? 0);
+  for (let b = last - 1; b >= 0; b--) {
     e = bioId.equal(int(b)).select(float(vals[b] ?? 0), e) as NF;
   }
   return e;
@@ -201,6 +204,8 @@ interface SiteSamples {
   rockExp: NF;
   moisture: NF;
   riverDepth: NF;
+  sand: NF;
+  artificial: NF;
   standing: NF; // W − h (standing-water depth)
   nrmXZ: NV2;
 }
@@ -230,6 +235,11 @@ function sampleSite(hf: Heightfield, wpos: NV2): SiteSamples {
     uv,
     0,
   ) as unknown as NV4;
+  const surface = texture(
+    hf.surfaceTex as NonNullable<typeof hf.surfaceTex>,
+    uv,
+    0,
+  ) as unknown as NV4;
   return {
     h,
     slope: ns.w,
@@ -239,6 +249,8 @@ function sampleSite(hf: Heightfield, wpos: NV2): SiteSamples {
     rockExp: bioExact.w,
     moisture: fields.x,
     riverDepth: fields.z,
+    sand: surface.r,
+    artificial: surface.a,
     standing: fields.w.sub(h),
     nrmXZ: vec2(ns.x, ns.z),
   };
@@ -293,8 +305,8 @@ export async function buildCanopyMap(
   const texel = WORLD_SIZE / CANOPY_RES; // 4 m
 
   // crown radius (m at scale 1) and skylight opacity per tree class
-  const crownR = [2.9, 2.7, 3.8, 2.7, 3.2, 0.9];
-  const opacity = [0.85, 0.7, 0.9, 0.65, 0.8, 0.12];
+  const crownR = [2.9, 2.7, 3.8, 2.7, 3.2, 0.9, 4.3, 3.5];
+  const opacity = [0.85, 0.7, 0.9, 0.65, 0.8, 0.12, 0.92, 0.78];
 
   const splatK = Fn(() => {
     const i = instanceIndex;
@@ -405,6 +417,9 @@ export async function runScatter(
     If(s.riverDepth.greaterThan(0.22).or(s.standing.greaterThan(0.3)), () => {
       Return();
     });
+    If(s.artificial.greaterThan(0.08), () => {
+      Return();
+    });
 
     const clump = clumpField(wpos, sT ^ 0x51f3);
     const dens = byBiome(s.bioId, [0, 0.22, 0.8, 0.85, 0.06, 0.26]);
@@ -420,7 +435,9 @@ export async function runScatter(
       .mul(treelineFade)
       .mul(snowFade)
       .mul(s.vegDens.mul(0.85).add(0.15))
-      .mul(float(1).sub(s.rockExp.mul(0.65)));
+      .mul(float(1).sub(s.rockExp.mul(0.65)))
+      .mul(hf.mp.landscape.ecology.forest)
+      .mul(s.sand.mul(0.95).oneMinus());
     If(cellHash(cell, sT ^ 0x1234f).greaterThanEqual(accept), () => {
       Return();
     });
@@ -438,9 +455,13 @@ export async function runScatter(
     const w4 = byBiome(s.bioId, [0, 0, 0, 0.2, 0, 0]) // karst gnarl
       .mul(s.rockExp.mul(1.6).add(0.4));
     const w5 = byBiome(s.bioId, [0, 0.15, 0.05, 0.05, 0.08, 0.28]); // snag
+    const w6 = byBiome(s.bioId, [0, 0.01, 0.1, 0.5, 0.34, 0.16]) // oak
+      .mul(m.mul(0.55).add(0.65));
+    const w7 = byBiome(s.bioId, [0, 0, 0.02, 0.08, 0.12, 0.72]) // willow
+      .mul(smoothstep(0.46, 0.9, m).mul(1.25).add(0.04));
 
     const r = cellHash(cell, sT ^ 0x77e1).mul(
-      w0.add(w1).add(w2).add(w3).add(w4).add(w5),
+      w0.add(w1).add(w2).add(w3).add(w4).add(w5).add(w6).add(w7),
     );
     const sp = int(0).toVar();
     const acc = w0.toVar();
@@ -458,6 +479,14 @@ export async function runScatter(
             acc.addAssign(w4);
             If(r.greaterThan(acc), () => {
               sp.assign(5);
+              acc.addAssign(w5);
+              If(r.greaterThan(acc), () => {
+                sp.assign(6);
+                acc.addAssign(w6);
+                If(r.greaterThan(acc), () => {
+                  sp.assign(7);
+                });
+              });
             });
           });
         });
@@ -523,6 +552,9 @@ export async function runScatter(
     If(s.riverDepth.greaterThan(0.2).or(s.standing.greaterThan(0.3)), () => {
       Return();
     });
+    If(s.artificial.greaterThan(0.08), () => {
+      Return();
+    });
 
     // canopy proxy = the TREE clump field (same salt → same parents)
     const canopy = clumpField(wpos, sT ^ 0x51f3);
@@ -536,25 +568,36 @@ export async function runScatter(
       .mul(treelineFade)
       .mul(float(1).sub(s.snow.mul(0.9)))
       .mul(s.vegDens.mul(0.9).add(0.1))
-      .mul(float(1).sub(s.rockExp.mul(0.85)));
+      .mul(float(1).sub(s.rockExp.mul(0.85)))
+      .mul(s.sand.mul(0.94).oneMinus())
+      .mul(Math.max(hf.mp.landscape.ecology.shrubs, hf.mp.landscape.ecology.flowers));
     If(cellHash(cell, sU ^ 0x2477).greaterThanEqual(accept), () => {
       Return();
     });
 
     const m = s.moisture;
     const edge = canopy.mul(float(1).sub(canopy)).mul(4); // 1 at clump rims
-    const w0 = byBiome(s.bioId, [0, 0.05, 0.15, 0.3, 0.04, 0.1]); // hazel
+    const shrubControl = float(hf.mp.landscape.ecology.shrubs);
+    const flowerControl = float(hf.mp.landscape.ecology.flowers);
+    const w0 = byBiome(s.bioId, [0, 0.05, 0.15, 0.3, 0.04, 0.1])
+      .mul(shrubControl); // hazel
     const w1 = byBiome(s.bioId, [0, 0, 0.02, 0.12, 0.1, 0.02]) // pink shrub
-      .mul(edge.mul(1.3).add(0.2));
+      .mul(edge.mul(1.3).add(0.2))
+      .mul(shrubControl);
     const w2 = byBiome(s.bioId, [0, 0.55, 0.3, 0.02, 0.03, 0]) // juniper
-      .mul(float(1.3).sub(m.mul(0.8)));
+      .mul(float(1.3).sub(m.mul(0.8)))
+      .mul(shrubControl);
     const w3 = byBiome(s.bioId, [0, 0.1, 0.4, 0.38, 0.03, 0.5]) // fern
       .mul(m.mul(1.1).add(0.3))
-      .mul(canopy.mul(1.1).add(0.35));
+      .mul(canopy.mul(1.1).add(0.35))
+      .mul(shrubControl);
     const gapK = float(1.25).sub(canopy.mul(0.9));
-    const w4 = byBiome(s.bioId, [0, 0.1, 0.05, 0.06, 0.3, 0.2]).mul(gapK); // umbel
-    const w5 = byBiome(s.bioId, [0, 0.08, 0.04, 0.06, 0.22, 0.1]).mul(gapK); // bell
-    const w6 = byBiome(s.bioId, [0, 0.12, 0.04, 0.06, 0.28, 0.08]).mul(gapK); // daisy
+    const w4 = byBiome(s.bioId, [0, 0.1, 0.05, 0.06, 0.3, 0.2])
+      .mul(gapK).mul(flowerControl); // umbel
+    const w5 = byBiome(s.bioId, [0, 0.08, 0.04, 0.06, 0.22, 0.1])
+      .mul(gapK).mul(flowerControl); // bell
+    const w6 = byBiome(s.bioId, [0, 0.12, 0.04, 0.06, 0.28, 0.08])
+      .mul(gapK).mul(flowerControl); // daisy
 
     const r = cellHash(cell, sU ^ 0x59d3).mul(
       w0.add(w1).add(w2).add(w3).add(w4).add(w5).add(w6),
@@ -626,6 +669,9 @@ export async function runScatter(
       Return();
     });
     If(s.riverDepth.greaterThan(0.3).or(s.standing.greaterThan(0.35)), () => {
+      Return();
+    });
+    If(s.artificial.greaterThan(0.12), () => {
       Return();
     });
 
@@ -742,6 +788,9 @@ export async function runScatter(
       Return();
     });
     If(s.standing.greaterThan(0.5), () => {
+      Return();
+    });
+    If(s.artificial.greaterThan(0.16), () => {
       Return();
     });
 

@@ -14,6 +14,13 @@ import {
   isWorldRecipeId,
   type WorldRecipeId,
 } from '../src/generation/core/WorldRecipe';
+import {
+  LANDSCAPE_PROFILE_IDS,
+  isLandscapeProfileId,
+  parseLandscapeTags,
+  type LandscapeProfileId,
+  type LandscapeTag,
+} from '../src/world/LandscapeProfile';
 
 type QualityPreset = 'low' | 'high' | 'ultra';
 
@@ -21,6 +28,9 @@ export interface TerrainBatchEntry {
   id: string;
   recipe: TerrainRecipeId;
   recipeLabel: string;
+  landscapeProfile: LandscapeProfileId;
+  landscapeInclude: LandscapeTag[];
+  landscapeExclude: LandscapeTag[];
   worldRecipe: WorldRecipeId;
   seed: number;
   shot: number;
@@ -29,7 +39,7 @@ export interface TerrainBatchEntry {
 
 export interface TerrainBatchManifest {
   schemaVersion: 1;
-  generator: 'laas-gaussian-terrain';
+  generator: 'codex-landscape-terrain';
   entries: TerrainBatchEntry[];
 }
 
@@ -41,6 +51,9 @@ export interface BuildTerrainBatchOptions {
   preset: QualityPreset;
   timeOfDay: number;
   worldRecipe: WorldRecipeId;
+  landscapeProfile?: LandscapeProfileId;
+  landscapeInclude?: readonly LandscapeTag[];
+  landscapeExclude?: readonly LandscapeTag[];
 }
 
 interface Flags {
@@ -111,8 +124,18 @@ function parseWorldRecipe(value: string): WorldRecipeId {
   throw new Error(`world: unknown recipe ${value}; expected ${WORLD_RECIPE_IDS.join(', ')}`);
 }
 
+function parseLandscapeProfile(value: string): LandscapeProfileId {
+  if (isLandscapeProfileId(value)) return value;
+  throw new Error(
+    `landscape: unknown profile ${value}; expected ${LANDSCAPE_PROFILE_IDS.join(', ')}`,
+  );
+}
+
 export function buildTerrainBatch(options: BuildTerrainBatchOptions): TerrainBatchManifest {
   const entries: TerrainBatchEntry[] = [];
+  const landscapeProfile = options.landscapeProfile ?? 'balanced';
+  const landscapeInclude = [...(options.landscapeInclude ?? [])];
+  const landscapeExclude = [...(options.landscapeExclude ?? [])];
   for (const recipeId of options.recipes) {
     for (const rawSeed of options.seeds) {
       if (!Number.isSafeInteger(rawSeed) || rawSeed < 0 || rawSeed > 0xffff_ffff) {
@@ -126,6 +149,9 @@ export function buildTerrainBatch(options: BuildTerrainBatchOptions): TerrainBat
         url.searchParams.set('scene', 'world');
         url.searchParams.set('seed', String(rawSeed));
         url.searchParams.set('terrain', recipeId);
+        url.searchParams.set('landscape', landscapeProfile);
+        if (landscapeInclude.length > 0) url.searchParams.set('include', landscapeInclude.join(','));
+        if (landscapeExclude.length > 0) url.searchParams.set('exclude', landscapeExclude.join(','));
         url.searchParams.set('world', options.worldRecipe);
         url.searchParams.set('preset', options.preset);
         url.searchParams.set('shot', String(shot));
@@ -133,9 +159,12 @@ export function buildTerrainBatch(options: BuildTerrainBatchOptions): TerrainBat
         url.searchParams.set('freeze', '1');
         url.searchParams.set('hud', '0');
         entries.push({
-          id: `${recipeId}-s${rawSeed}-shot${shot}`,
+          id: `${recipeId}-${landscapeProfile}-s${rawSeed}-shot${shot}`,
           recipe: recipeId,
           recipeLabel: terrainRecipe(recipeId).label,
+          landscapeProfile,
+          landscapeInclude,
+          landscapeExclude,
           worldRecipe: options.worldRecipe,
           seed: rawSeed,
           shot,
@@ -144,7 +173,7 @@ export function buildTerrainBatch(options: BuildTerrainBatchOptions): TerrainBat
       }
     }
   }
-  return { schemaVersion: 1, generator: 'laas-gaussian-terrain', entries };
+  return { schemaVersion: 1, generator: 'codex-landscape-terrain', entries };
 }
 
 function usage(): string {
@@ -157,6 +186,9 @@ function usage(): string {
     '  --shots 1,5,9',
     '  --preset low|high|ultra',
     '  --world wilderness|magic-forest-ruins|fantasy-city',
+    '  --landscape legacy|balanced|wild|settled|arid|alpine',
+    '  --include hills,plains,forest,flowers,cobble',
+    '  --exclude desert,snow,concrete',
     '  --time 11',
     '  --base-url http://localhost:5173/',
     '  --out generated/terrain-batch.json',
@@ -174,6 +206,9 @@ async function main(): Promise<void> {
   const shots = parseIntegerList(stringFlag(flags, 'shots', '1'), 'shots');
   const preset = parsePreset(stringFlag(flags, 'preset', 'low'));
   const worldRecipe = parseWorldRecipe(stringFlag(flags, 'world', 'wilderness'));
+  const landscapeProfile = parseLandscapeProfile(stringFlag(flags, 'landscape', 'balanced'));
+  const landscapeInclude = parseLandscapeTags(stringFlag(flags, 'include', ''));
+  const landscapeExclude = parseLandscapeTags(stringFlag(flags, 'exclude', ''));
   const timeOfDay = Number(stringFlag(flags, 'time', '11'));
   if (!Number.isFinite(timeOfDay) || timeOfDay < 0 || timeOfDay > 24) {
     throw new Error(`time must be in 0..24; received ${timeOfDay}`);
@@ -186,6 +221,9 @@ async function main(): Promise<void> {
     preset,
     timeOfDay,
     worldRecipe,
+    landscapeProfile,
+    landscapeInclude,
+    landscapeExclude,
   });
   const out = stringFlag(flags, 'out', 'generated/terrain-batch.json');
   await mkdir(dirname(out), { recursive: true });

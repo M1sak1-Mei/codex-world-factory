@@ -119,6 +119,8 @@ export async function runBiomeSnow(
     )
       .pow(0.78) // perceptual boost: partial coverage reads as snow, not gray
       .mul(smoothstep(0.02, 0.0, water)) // not on water
+      .mul(mp.landscape.ecology.snow)
+      .clamp(0, 1)
       .toVar();
 
     // --- rock exposure -----------------------------------------------------------
@@ -134,16 +136,18 @@ export async function runBiomeSnow(
     const isSubalpine = h.greaterThan(float(TREELINE - 170).add(tNoise.mul(70)));
     const lowFlat = slope.lessThan(0.35);
     const isWetland = moisture
-      .greaterThan(0.72)
+      .greaterThan(0.72 + Math.max(0, 1 - mp.landscape.ecology.wetland) * 0.24)
       .and(lowFlat)
-      .and(h.lessThan(LAKE_LEVEL + 70));
+      .and(h.lessThan(LAKE_LEVEL + 70))
+      .and(float(mp.landscape.ecology.wetland).greaterThan(0));
     const meadowNoise = mx_noise_float(wpos.div(560).add(vec2(mp.off.hills[0], mp.off.hills[1])));
     const isMeadow = meadowNoise
-      .greaterThan(0.22)
+      .greaterThan(0.22 + Math.max(0, 1 - mp.landscape.ecology.meadow) * 0.9)
       .and(slope.lessThan(0.42))
       .and(moisture.lessThan(0.72))
       .and(h.lessThan(520))
-      .and(zm.tKarst.lessThan(0.4));
+      .and(zm.tKarst.lessThan(0.4))
+      .and(float(mp.landscape.ecology.meadow).greaterThan(0));
     const isKarst = zm.tKarst.greaterThan(0.42);
 
     const biome = isAlpine
@@ -167,7 +171,25 @@ export async function runBiomeSnow(
       .mul(smoothstep(-2.5, 1.5, temp))
       .mul(smoothstep(0.05, 0.25, moisture.add(0.15)))
       .mul(smoothstep(1.9, 1.1, slope));
-    const dens = clamp(densBase.sub(snow.mul(0.7)), 0, 1);
+    const biomeEcology = isMeadow.select(
+      float(mp.landscape.ecology.meadow),
+      isWetland.select(
+        float(mp.landscape.ecology.wetland),
+        float(mp.landscape.ecology.forest),
+      ),
+    );
+    const aridSuppress = smoothstep(0.42, 0.88, moisture.oneMinus())
+      .mul(mp.landscape.ecology.desert)
+      .mul(0.72)
+      .clamp(0, 0.92);
+    const dens = clamp(
+      densBase
+        .mul(biomeEcology)
+        .mul(aridSuppress.oneMinus())
+        .sub(snow.mul(0.7)),
+      0,
+      1,
+    );
 
     const DIAG_COMPONENTS = false; // temp bisect: write snow components
     textureStore(

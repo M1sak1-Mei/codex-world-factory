@@ -36,10 +36,22 @@ import {
   type GaussianStamp,
   type TerrainRecipeId,
 } from './TerrainRecipe';
+import {
+  resolveLandscapeProfile,
+  type ResolvedLandscapeProfile,
+} from './LandscapeProfile';
+import {
+  makeLandscapeSurfaceLayout,
+  type LandscapeSurfaceLayout,
+} from './LandscapeSurface';
 import { KARST_PLATEAU, LAKE_LEVEL, WORLD_HALF } from './WorldConst';
 
 export interface MacroParams {
   recipeId: TerrainRecipeId;
+  /** Resolved include/exclude controls consumed by every landscape pass. */
+  landscape: ResolvedLandscapeProfile;
+  /** Deterministic artificial-ground primitives shared by render/scatter. */
+  surfaceLayout: LandscapeSurfaceLayout;
   /** Seed-resolved, art-directed terrain modifiers. */
   gaussianStamps: GaussianStamp[];
   alpC: [number, number];
@@ -58,7 +70,10 @@ export interface MacroParams {
   tribFloors: number[];
   tribWidth: number;
   /** noise domain offsets (decorrelate fields per seed) */
-  off: Record<'warp' | 'ridge' | 'hills' | 'karst' | 'detail' | 'hard' | 'far', [number, number]>;
+  off: Record<
+    'warp' | 'ridge' | 'hills' | 'plains' | 'basins' | 'karst' | 'detail' | 'hard' | 'far',
+    [number, number]
+  >;
 }
 
 function jit(rng: Rng, base: [number, number], amount: number): [number, number] {
@@ -68,6 +83,7 @@ function jit(rng: Rng, base: [number, number], amount: number): [number, number]
 export function makeMacroParams(
   seed: WorldSeed,
   recipeId: TerrainRecipeId = 'laas',
+  landscape: ResolvedLandscapeProfile = resolveLandscapeProfile('legacy'),
 ): MacroParams {
   // separate streams per component: adding draws to one never re-rolls others
   const rngAnchor = seed.rng('macro-anchors');
@@ -99,6 +115,8 @@ export function makeMacroParams(
   ];
   return {
     recipeId,
+    landscape,
+    surfaceLayout: makeLandscapeSurfaceLayout(seed, landscape),
     gaussianStamps: resolveGaussianStamps(seed, recipeId),
     alpC: jit(rngAnchor, [1460, -1470], 150),
     alpR: 1820 + rngAnchor.range(-120, 120),
@@ -122,6 +140,8 @@ export function makeMacroParams(
       detail: off(),
       hard: off(),
       far: off(),
+      plains: off(),
+      basins: off(),
     },
   };
 }
@@ -202,16 +222,17 @@ export interface ValleyFields {
 /** Just the carving-spline fields (shared by macroTerrain and the river pass). */
 export function valleyFields(p: NV2, mp: MacroParams): ValleyFields {
   const o = mp.off;
+  const warpStrength = mp.landscape.noise.warp;
   const vWarpV = vec2(
     mx_noise_float(p.div(290).add(vec2(o.warp[0], o.warp[1]))),
     mx_noise_float(p.div(290).add(vec2(o.warp[1] + 53, o.warp[0] - 53))),
-  ).mul(85);
+  ).mul(85 * warpStrength);
   // fine meander octave: spline segments are straight lines — without this
   // the carved trenches read as long ruler-straight scars (user-flagged)
   const vWarpF = vec2(
     mx_noise_float(p.div(61).add(vec2(o.warp[0] + 211, o.warp[1] - 97))),
     mx_noise_float(p.div(61).add(vec2(o.warp[1] - 131, o.warp[0] + 173))),
-  ).mul(16);
+  ).mul(16 * warpStrength);
   const pWarped = p.add(vWarpV).add(vWarpF);
   const valley = splineField(pWarped, mp.valley, mp.valleyFloors);
   const trib = splineField(pWarped, mp.trib, mp.tribFloors);
@@ -233,7 +254,9 @@ export interface ZoneMasks {
 export function zoneMasks(p: NV2, mp: MacroParams): ZoneMasks {
   const o = mp.off;
   const dAlp = p.sub(vec2(mp.alpC[0], mp.alpC[1])).length();
-  const tAlp = pow(falloff(dAlp, mp.alpR), 1.2);
+  const tAlp = pow(falloff(dAlp, mp.alpR), 1.2).mul(
+    mp.landscape.noise.mountains > 0 ? 1 : 0,
+  );
   const dLake = p.sub(vec2(mp.lakeC[0], mp.lakeC[1])).length();
   const tLake = falloff(dLake, mp.lakeR);
   const kw = vec2(
@@ -293,11 +316,12 @@ export function macroTerrain(p: NV2, mp: MacroParams, detail: 'full' | 'far'): M
   const valleyDist = vf.valleyDist;
   const tribDist = vf.tribDist;
   const recipe = gaussianFields(p, mp.gaussianStamps);
+  const controls = mp.landscape.noise;
 
   // --- base + hills ----------------------------------------------------------
   // NOTE mx_noise/mx_fractal outputs are SIGNED (≈[-1,1]) — remap explicitly.
   const hillsRaw = mx_fractal_noise_float(
-    p.div(1350).add(vec2(o.hills[0], o.hills[1])),
+    p.div(1350 * controls.macroScale).add(vec2(o.hills[0], o.hills[1])),
     full ? 5 : 4,
     2.1,
     0.52,
@@ -309,11 +333,41 @@ export function macroTerrain(p: NV2, mp: MacroParams, detail: 'full' | 'far'): M
   // compress the lows (1−(1−n)^1.7): dales stay shallow → terrain drains
   // instead of pooling in deep fBm bowls
   const hillsN = hillsRaw.oneMinus().pow(1.7).oneMinus();
-  const hillsMask = tAlp.oneMinus().mul(tKarst.mul(0.72).oneMinus());
+  const plainsNoise = mx_fractal_noise_float(
+    p.div(1850 * controls.macroScale).add(vec2(o.plains[0], o.plains[1])),
+    full ? 4 : 3,
+    2.05,
+    0.54,
+    1,
+  )
+    .mul(0.5)
+    .add(0.5);
+  const plainMask = smoothstep(0.48, 0.78, plainsNoise)
+    .mul(controls.plains)
+    .clamp(0, 1);
+  const basinNoise = mx_fractal_noise_float(
+    p.div(2200 * controls.macroScale).add(vec2(o.basins[0], o.basins[1])),
+    3,
+    2.1,
+    0.52,
+    1,
+  )
+    .mul(0.5)
+    .add(0.5);
+  const basinMask = smoothstep(0.57, 0.82, basinNoise)
+    .mul(controls.basins)
+    .mul(tAlp.oneMinus())
+    .mul(tKarst.oneMinus())
+    .clamp(0, 1);
+  const hillsMask = tAlp
+    .oneMinus()
+    .mul(tKarst.mul(0.72).oneMinus())
+    .mul(plainMask.mul(0.82).oneMinus());
   const base = float(192)
-    .add(hillsN.mul(135).mul(hillsMask))
+    .add(hillsN.mul(135 * controls.hills).mul(hillsMask))
     .add(float(KARST_PLATEAU - 192).mul(tKarst))
-    .sub(tLake.pow(1.5).mul(110));
+    .sub(tLake.pow(1.5).mul(110))
+    .sub(basinMask.mul(82));
 
   // --- alpine ridges (anisotropic, serrated) ---------------------------------
   // rotate domain 45° and squash so ridgelines align NE–SW like a real range
@@ -338,7 +392,9 @@ export function macroTerrain(p: NV2, mp: MacroParams, detail: 'full' | 'far'): M
     }
     ridge = ridge.div(norm);
   }
-  const mountains = tAlp.mul(ridge.pow(1.5).mul(1380).add(tAlp.mul(470)));
+  const mountains = tAlp
+    .mul(ridge.pow(1.5).mul(1380).add(tAlp.mul(470)))
+    .mul(controls.mountains);
 
   // --- karst towers (full detail only — far shell sees plateau mass) ---------
   let towers: NF = float(0);
@@ -365,7 +421,13 @@ export function macroTerrain(p: NV2, mp: MacroParams, detail: 'full' | 'far'): M
 
   // --- pre-valley height ------------------------------------------------------
   const detailN = full
-    ? mx_fractal_noise_float(p.div(62).add(vec2(o.detail[0], o.detail[1])), 4, 2.05, 0.5, 1).mul(7)
+    ? mx_fractal_noise_float(
+        p.div(62 * controls.detailScale).add(vec2(o.detail[0], o.detail[1])),
+        4,
+        2.05,
+        0.5,
+        1,
+      ).mul(7 * controls.detailAmplitude)
     : float(0);
   // Recipe stamps land before drainage carving so the established valley and
   // outlet remain authoritative even when a new range crosses the map.
@@ -389,7 +451,13 @@ export function macroTerrain(p: NV2, mp: MacroParams, detail: 'full' | 'far'): M
     }
     outer = outer.div(norm);
     const gaps = smoothstep(0.25, 0.75, mx_noise_float(p.div(3900).add(17.3)).mul(0.5).add(0.5));
-    h = h.add(outer.pow(1.5).mul(1750).mul(band).mul(gaps));
+    h = h.add(
+      outer
+        .pow(1.5)
+        .mul(1750 * controls.mountains)
+        .mul(band)
+        .mul(gaps),
+    );
   }
 
   // gentle monotonic tilt toward the valley spine so hill country drains

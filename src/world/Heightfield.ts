@@ -34,6 +34,7 @@ import { bilerpFloatBuffer, uvToGrid } from '../gpu/BufferSample';
 import { bakeNoiseTextures } from '../gpu/passes/NoiseBake';
 import type { NF, NI, NV2, NV3 } from '../gpu/TSLTypes';
 import { runBiomeSnow } from '../gpu/passes/BiomeSnow';
+import { runSurfaceClassification } from '../gpu/passes/SurfaceClassification';
 import { runErosion } from '../gpu/passes/Erosion';
 import { runFlowRivers, type FlowResult } from '../gpu/passes/FlowRivers';
 import {
@@ -42,6 +43,7 @@ import {
   type SynthesisResult,
 } from '../gpu/passes/HeightSynthesis';
 import { makeMacroParams, type MacroParams } from './MacroMap';
+import { resolveLandscapeProfile } from './LandscapeProfile';
 import { WORLD_SIZE, qualityConfig, type QualityConfig } from './WorldConst';
 
 export type ProgressFn = (p: number, msg: string) => void;
@@ -76,6 +78,8 @@ export class Heightfield {
   fieldsTex: StorageTexture | null = null;
   /** rgba8 at full res: biomeId/8, snow, vegDensity, rockExposure */
   biomeTex: StorageTexture | null = null;
+  /** rgba8 at full res: sand, cobble, concrete, any artificial ground */
+  surfaceTex: StorageTexture | null = null;
   /** CPU height mirror for camera clamping / tools (filled by readback) */
   cpuHeights: Float32Array | null = null;
   /** CPU waterY mirror (sim res) — underwater camera guard */
@@ -112,7 +116,12 @@ export class Heightfield {
     progress: ProgressFn,
   ): Promise<Heightfield> {
     const cfg = qualityConfig(params.preset);
-    const mp = makeMacroParams(seed, params.terrainRecipe);
+    const landscape = resolveLandscapeProfile(
+      params.landscapeProfile,
+      params.landscapeInclude,
+      params.landscapeExclude,
+    );
+    const mp = makeMacroParams(seed, params.terrainRecipe, landscape);
 
     progress(0.04, `terrain: synthesizing ${cfg.heightRes}² heightfield`);
     const synth = await runHeightSynthesis(renderer, cfg.heightRes, mp);
@@ -184,6 +193,15 @@ export class Heightfield {
       mp,
       normalTex: hf.normalTex,
       fieldsTex: hf.fieldsTex,
+    });
+
+    progress(0.91, 'terrain: natural + artificial surface classification');
+    hf.surfaceTex = await runSurfaceClassification(renderer, hf.height, {
+      res: hf.res,
+      mp,
+      normalTex: hf.normalTex,
+      fieldsTex: hf.fieldsTex,
+      biomeTex: hf.biomeTex,
     });
 
     progress(0.93, 'terrain: height readback for camera');

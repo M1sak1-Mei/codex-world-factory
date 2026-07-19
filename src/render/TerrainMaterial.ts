@@ -48,6 +48,8 @@ export interface TerrainShadingInputs {
   biomeTex: StorageTexture;
   /** rgba16f at sim res: moisture, flowStrength, riverDepth, W */
   fieldsTex: StorageTexture;
+  /** rgba8: sand, cobble, concrete, any artificial ground */
+  surfaceTex: StorageTexture;
   /** baked tileable noise (NoiseBake channel map) */
   noiseA: StorageTexture;
   noiseB: StorageTexture;
@@ -145,6 +147,11 @@ export function buildTerrainShading(inp: TerrainShadingInputs): TerrainShading {
   const moisture = mix(fields.x, float(0.35), outsideK);
   const flowStrength = mix(fields.y, float(0), outsideK);
   const riverDepth = mix(fields.z, float(0), outsideK);
+  const surfaces = texture(inp.surfaceTex, uv).mul(outsideK.oneMinus());
+  const sandField = surfaces.r;
+  const cobbleField = surfaces.g;
+  const concreteField = surfaces.b;
+  const artificialField = surfaces.a;
   const zm = zoneMasks(wxz, inp.mp);
 
   // ---------- macro variation (2–50 m breakup — tiling killer) ----------------
@@ -208,6 +215,14 @@ export function buildTerrainShading(inp: TerrainShadingInputs): TerrainShading {
   const forestFloor = mix(litter, mossy, smoothstep(0.45, 0.8, moisture).mul(0.7));
   // gravel/cobble tint in stream channels
   const gravel = mix(vec3(0.34, 0.33, 0.31), vec3(0.47, 0.45, 0.43), micro);
+  const sandCol = mix(vec3(0.34, 0.25, 0.13), vec3(0.68, 0.51, 0.27), macroMix)
+    .mul(meso.mul(0.22).add(0.87));
+  const cobbleJoint = smoothstep(0.42, 0.58, val(0.7, 0.19, 0.83));
+  const cobbleCol = mix(vec3(0.22, 0.215, 0.205), vec3(0.42, 0.405, 0.38), cobbleJoint)
+    .mul(macroA.mul(0.12).add(0.94));
+  const concreteWear = fbmV(2.8, 0.47, 0.21).mul(0.18).add(0.86);
+  const concreteCol = mix(vec3(0.31, 0.315, 0.31), vec3(0.48, 0.475, 0.45), macroB)
+    .mul(concreteWear);
   const snowCol = mix(vec3(0.86, 0.88, 0.94), vec3(0.93, 0.95, 0.99), macroA).mul(
     meso.mul(0.08).add(0.95),
   );
@@ -218,14 +233,17 @@ export function buildTerrainShading(inp: TerrainShadingInputs): TerrainShading {
     .mul(smoothstep(1.15, 0.7, slope))
     .mul(smoothstep(380, 700, h))
     .mul(rockW.oneMinus());
+  const naturalGround = sandField.max(artificialField).oneMinus();
   const grassW = smoothstep(0.5, 0.22, slope)
     .mul(vegDensity)
     .mul(zm.tKarst.mul(0.5).oneMinus())
-    .mul(rockW.oneMinus());
+    .mul(rockW.oneMinus())
+    .mul(naturalGround);
   const forestW = vegDensity
     .mul(smoothstep(0.9, 0.45, slope))
     .mul(smoothstep(0.25, 0.6, moisture.add(zm.tKarst.mul(0.3))))
-    .mul(rockW.oneMinus());
+    .mul(rockW.oneMinus())
+    .mul(naturalGround);
   // gravel only for REAL channels on open ground: weak-flow rills under
   // grass painted pale streaks down every meadow hillside — those should
   // darken via moisture instead
@@ -251,6 +269,9 @@ export function buildTerrainShading(inp: TerrainShadingInputs): TerrainShading {
   col = mix(col, rockCol, rockW);
   col = mix(col, gravel, riverW.mul(0.85).mul(pondK.oneMinus()));
   col = mix(col, vec3(0.055, 0.052, 0.038), pondK);
+  col = mix(col, sandCol, sandField);
+  col = mix(col, cobbleCol, cobbleField);
+  col = mix(col, concreteCol, concreteField);
   col = mix(col, snowCol, snowW);
   col = col.mul(macroTint.add(1));
 
@@ -326,6 +347,7 @@ export function buildTerrainShading(inp: TerrainShadingInputs): TerrainShading {
     const b2 = fbmG(0.19, 0.31, 0.77).mul(0.24 * 2);
     const bumpAmp = mix(float(0.25), float(0.85), rockW)
       .mul(snowW.mul(0.7).oneMinus())
+      .mul(artificialField.mul(0.92).oneMinus())
       .mul(farK.oneMinus());
     nrm = nrm
       .add(
@@ -352,6 +374,7 @@ export function buildTerrainShading(inp: TerrainShadingInputs): TerrainShading {
     const dispAmpF = mix(float(DISP.base), float(DISP.rock), rockKd)
       .max(gravelKd)
       .mul(snowW.mul(0.75).oneMinus())
+      .mul(artificialField.mul(0.96).oneMinus())
       .mul(
         clamp(float(DISP.fade1).sub(camDist).div(DISP.fade1 - DISP.fade0), 0, 1),
       );
@@ -365,6 +388,8 @@ export function buildTerrainShading(inp: TerrainShadingInputs): TerrainShading {
 
   // ---------- roughness ---------------------------------------------------------------
   const rough = mix(float(0.94), float(0.8), rockW)
+    .sub(cobbleField.mul(0.08))
+    .sub(concreteField.mul(0.2))
     .sub(snowW.mul(0.32))
     .sub(wet.mul(0.45))
     .clamp(0.25, 1);

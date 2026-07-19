@@ -304,6 +304,38 @@ export const SNAG: SpeciesParams = {
   stubChance: 0.28,
 };
 
+/** Broad, heavy lowland crown; shares the mature broadleaf grammar but uses
+ * a wider age/flare envelope and warmer foliage to remain readable in mix. */
+export const OAK: SpeciesParams = {
+  ...BEECH,
+  id: 'oak',
+  label: 'Ancient oak (broadleaf)',
+  height: [14, 24],
+  crown: 'dome',
+  asym: 0.42,
+  flare: { amp: 0.82, height: 1.5, lobes: 7 },
+  barkLayer: 4,
+  barkRepeats: 4,
+  foliageColor: { r: 0.075, g: 0.135, b: 0.025, hueVar: 0.36 },
+  stubChance: 0.07,
+};
+
+/** Moisture-loving river and basin tree. Birch's hanging twig hierarchy is
+ * intentionally reused, with a lower spreading crown and willow palette. */
+export const WILLOW: SpeciesParams = {
+  ...BIRCH,
+  id: 'willow',
+  label: 'River willow (broadleaf)',
+  height: [8, 14],
+  crown: 'dome',
+  asym: 0.48,
+  flare: { amp: 0.5, height: 0.75, lobes: 5 },
+  barkLayer: 2,
+  barkRepeats: 3,
+  foliageColor: { r: 0.08, g: 0.17, b: 0.045, hueVar: 0.3 },
+  stubChance: 0.04,
+};
+
 export const TREE_SPECIES: readonly SpeciesParams[] = [
   SPRUCE,
   PINE,
@@ -311,4 +343,6 @@ export const TREE_SPECIES: readonly SpeciesParams[] = [
   BIRCH,
   KARST_GNARL,
   SNAG,
+  OAK,
+  WILLOW,
 ];

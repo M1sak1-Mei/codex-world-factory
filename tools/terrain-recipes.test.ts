@@ -34,6 +34,9 @@ test('batch manifest is a deterministic Cartesian product', () => {
     preset: 'low' as const,
     timeOfDay: 11,
     worldRecipe: 'wilderness' as const,
+    landscapeProfile: 'arid' as const,
+    landscapeInclude: ['desert'] as const,
+    landscapeExclude: ['snow', 'concrete'] as const,
   };
   const a = buildTerrainBatch(options);
   const b = buildTerrainBatch(options);
@@ -42,6 +45,9 @@ test('batch manifest is a deterministic Cartesian product', () => {
   const url = new URL(a.entries[0]?.url ?? '');
   assert.equal(url.searchParams.get('seed'), '7');
   assert.equal(url.searchParams.get('terrain'), 'laas');
+  assert.equal(url.searchParams.get('landscape'), 'arid');
+  assert.equal(url.searchParams.get('include'), 'desert');
+  assert.equal(url.searchParams.get('exclude'), 'snow,concrete');
   assert.equal(url.searchParams.get('freeze'), '1');
 });
 

@@ -1,4 +1,4 @@
-/** LAAS entry point — boot sequence with fail-loud diagnostics. */
+/** Codex World Factory entry point — boot sequence with fail-loud diagnostics. */
 
 import { BootUI } from './core/BootUI';
 import { browserGate } from './core/BrowserGate';
@@ -33,7 +33,7 @@ async function boot(): Promise<void> {
   const diag = await probeWebGPU();
   hooks.diag = diag;
   if (!diag.ok) {
-    failLoud('WebGPU unavailable — LAAS has no fallback by design', [
+    failLoud('WebGPU unavailable — Codex World Factory has no fallback by design', [
       diag.reason ?? 'unknown reason',
       '',
       'Chrome exposes WebGPU here, but no usable GPU adapter came up. Check:',
