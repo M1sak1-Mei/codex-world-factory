@@ -104,14 +104,16 @@ feature/magic-forest-ruins/ancient-grove/site-0
 
 `Heightfield.generate()` 根据 `TerrainRecipe` 建立高度场：
 
-1. 原始宏观地形提供山体、峡谷、喀斯特区和湖盆骨架。
-2. 各向异性 Gaussian stamps 叠加可编辑的山脉、裂谷或火山口形态。
+1. 每个配方先声明基础骨架权重：高山、喀斯特、湖盆、主河谷、支谷和远景山脉。
+2. 各向异性 Gaussian stamps 再叠加可编辑的山脉、裂谷或火山口形态。
 3. 水力与热力侵蚀改变坡面、沉积和沟谷。
 4. 水文系统计算流向、河道、湖泊和出水口。
 5. 湿度、坡度、海拔和暴露度共同形成生物群系与积雪。
 6. CDLOD 地形瓦片和远景壳体负责最终渲染。
 
-Gaussian 配方只改变宏观地貌和硬度，不绕过侵蚀、水文、植被和渲染主流程。
+基础骨架和 Gaussian stamps 都只改变宏观地貌与硬度，不绕过侵蚀、水文、植被和
+渲染主流程。只有 `laas` 保留完整的原始高山 + 喀斯特双核心；其他配方会按自身
+构图关闭或弱化它们，因此不再出现“换了配方，中间仍是同两座山”的情况。
 
 ### 3. 地形只读接口
 
@@ -375,12 +377,13 @@ src/generation/
 ### 新增地形配方
 
 1. 在 `src/world/TerrainRecipe.ts` 增加 `TerrainRecipe`。
-2. 为每个 Gaussian stamp 提供稳定、唯一的 `id`。
-3. 调整 `center`、`sigma`、`rotation`、`amplitude`、`sharpness` 和 `hardness`。
-4. 只使用有上限的 seed jitter，避免场景失控。
-5. 将 ID 加入 `TERRAIN_RECIPE_IDS` 和配方表。
-6. 运行地形确定性测试和多 seed WebGPU 批量截图。
-7. 检查水面覆盖、地图边缘出水口、相机出生点和植被分布。
+2. 先设置 `foundation` 中六类基础骨架的权重，明确哪些旧构图需要保留。
+3. 为每个 Gaussian stamp 提供稳定、唯一的 `id`。
+4. 调整 `center`、`sigma`、`rotation`、`amplitude`、`sharpness` 和 `hardness`。
+5. 只使用有上限的 seed jitter，避免场景失控。
+6. 将 ID 加入 `TERRAIN_RECIPE_IDS` 和配方表。
+7. 运行地形确定性测试和多 seed WebGPU 批量截图。
+8. 检查水面覆盖、地图边缘出水口、干地出生点、瓦片接缝和植被分布。
 
 详细规则见 [docs/TERRAIN-GENERATOR.md](docs/TERRAIN-GENERATOR.md)。
 
@@ -560,8 +563,8 @@ World = Seed × TerrainRecipe × LandscapeProfile × WorldRecipe
 # 丰富的默认森林：丘陵、平原、盆地、花草和少量铺装
 http://localhost:5173/?terrain=laas&landscape=balanced&seed=42&preset=low
 
-# 明确要求低地、森林、花和石板路，同时禁止沙漠、雪和水泥地
-http://localhost:5173/?terrain=rolling-lowlands&landscape=balanced&include=plains,basins,forest,grass,flowers,cobble&exclude=desert,snow,concrete&seed=42&preset=low
+# 无固定中央山体的滚动低地案例：丘陵、平原、森林、草甸和花，明确禁用高山
+http://localhost:5173/?terrain=rolling-lowlands&landscape=balanced&include=hills,plains,forest,meadow,grass,flowers&exclude=mountains,desert,snow,cobble,concrete&seed=137&preset=low&alt=220&x=-700&z=700&yaw=-0.785&pitch=-0.28
 
 # 沙漠台地，不生成森林、雪地、花和人工地坪
 http://localhost:5173/?terrain=desert-mesas&landscape=arid&include=desert&exclude=forest,snow,flowers,cobble,concrete&seed=17&preset=low
@@ -597,6 +600,10 @@ http://localhost:5173/?terrain=laas&landscape=legacy&seed=42&preset=low
 
 - 地形配方增加 `rolling-lowlands`、`basin-country`、`desert-mesas`、
   `glacial-uplands`；连同原有配方共 8 种宏观构图。
+- 每个 `TerrainRecipe` 现在拥有独立 `foundation`，可分别控制原始高山、喀斯特、湖盆、
+  主河谷、支谷和远景山脉；Gaussian 不再被迫叠加在相同的双山骨架上。
+- CDLOD 接缝使用更深的双面 skirt，远景壳只在方形世界边缘保留窄重叠带；默认出生点
+  同时检查干地邻域并在植被散布前预留净空，避免湖岸透明面和远景壳被误认为地面穿透。
 - 高度场噪声现在分别暴露宏观尺度、丘陵、平原、盆地、山体、微细节和河谷扭曲强度，
   预设只提供默认值，不再把这些强度散落写死在不同 pass 中。
 - 地表分类新增独立 `surfaceTex`：R/G/B/A 分别表示沙地、石板路、水泥地和任意人工地面。

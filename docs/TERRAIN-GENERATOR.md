@@ -7,16 +7,18 @@ vegetation, water, or CDLOD rendering:
 ```text
 seed + terrain recipe
         ↓
-macro terrain + anisotropic Gaussian stamps
+recipe foundation + anisotropic Gaussian stamps
         ↓
 hydraulic/thermal erosion → hydrology → biome/snow
         ↓
 the normal LAAS world renderer
 ```
 
-This placement is important. Gaussian stamps are evaluated before valley
-carving, so the main valley and its map-edge outlet remain authoritative when
-a generated mountain range crosses them.
+Each recipe owns weights for the reusable alpine massif, karst plateau, lake
+basin, main valley, tributary, and outer ranges. `laas` keeps the full original
+skeleton; other recipes can replace it instead of adding new stamps on top of
+the same central mountains. Stamps are still evaluated before recipe-weighted
+drainage carving.
 
 ## Use a recipe
 
@@ -34,6 +36,10 @@ Available recipes:
 | `folded-ranges` | Three long, offset mountain folds. |
 | `rift-valley` | A diagonal low rift with two hard shoulders. |
 | `caldera-lake` | A nested Gaussian caldera with a southwest breach. |
+| `rolling-lowlands` | Broad swells and shallow low country without the fixed massif. |
+| `basin-country` | An inhabited basin with asymmetric rims. |
+| `desert-mesas` | Separate hard tablelands over a dry plain. |
+| `glacial-uplands` | High shoulders and a scooped glacial trough. |
 
 An unknown recipe safely falls back to `laas`. The same recipe and seed always
 resolve to the same stamp positions, rotations, and amplitudes.

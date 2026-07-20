@@ -5,7 +5,13 @@ import {
   TERRAIN_RECIPE_IDS,
   parseTerrainRecipeId,
   resolveGaussianStamps,
+  terrainRecipe,
 } from '../src/world/TerrainRecipe';
+import {
+  FAR_SHELL_CLIP_INNER,
+  farShellCoverageAt,
+  terrainSkirtDrop,
+} from '../src/world/TerrainShell';
 import { buildTerrainBatch, parseIntegerList } from './terrain-batch';
 
 test('unknown terrain recipe falls back to the original LAAS layout', () => {
@@ -23,6 +29,32 @@ test('Gaussian stamps are deterministic and stream-isolated', () => {
     assert.ok(stamp.sigma[0] > 0 && stamp.sigma[1] > 0);
     assert.ok(stamp.sharpness > 0);
   }
+});
+
+test('terrain recipes own distinct macro foundations', () => {
+  const original = terrainRecipe('laas').foundation;
+  const basin = terrainRecipe('basin-country').foundation;
+  const lowlands = terrainRecipe('rolling-lowlands').foundation;
+  assert.equal(original.alpineMassif, 1);
+  assert.equal(original.karstPlateau, 1);
+  assert.equal(basin.alpineMassif, 0);
+  assert.equal(basin.karstPlateau, 0);
+  assert.equal(lowlands.alpineMassif, 0);
+  assert.notDeepEqual(basin, original);
+  for (const id of TERRAIN_RECIPE_IDS) {
+    for (const weight of Object.values(terrainRecipe(id).foundation)) {
+      assert.ok(weight >= 0 && weight <= 1, `${id} foundation weight out of range`);
+    }
+  }
+});
+
+test('far shell cannot render below the interior terrain', () => {
+  assert.equal(farShellCoverageAt(0, 0), 0);
+  assert.equal(farShellCoverageAt(FAR_SHELL_CLIP_INNER - 1, 0), 0);
+  assert.equal(farShellCoverageAt(2048, 0), 1);
+  assert.equal(farShellCoverageAt(0, -2048), 1);
+  assert.ok(terrainSkirtDrop(64) >= 9.5);
+  assert.ok(terrainSkirtDrop(128) > terrainSkirtDrop(64));
 });
 
 test('batch manifest is a deterministic Cartesian product', () => {

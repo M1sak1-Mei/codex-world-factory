@@ -67,6 +67,18 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
     seed,
     worldHalf: WORLD_HALF,
   });
+  const defaultWalkSpawn = findWalkSpawn(hf);
+  const scatterExclusions = [
+    ...featurePlan.exclusions,
+    {
+      id: 'system/default-walk-spawn',
+      center: [defaultWalkSpawn.x, defaultWalkSpawn.z] as const,
+      treeRadius: 14,
+      understoryRadius: 9,
+      extrasRadius: 7,
+      stonesRadius: 3,
+    },
+  ];
 
   // physical sky first: probe gathering needs the atmosphere LUTs.
   // ?shot=N boots straight into a composed bookmark — use ITS time of day
@@ -85,7 +97,7 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
   // before tiles (under-crown ambient)
   ctx.progress(0.94, 'vegetation: scattering instances');
   const scatter = await runScatter(engine.renderer, hf, seed, {
-    exclusions: featurePlan.exclusions,
+    exclusions: scatterExclusions,
   });
   const canopyTex = await buildCanopyMap(engine.renderer, scatter.trees);
   engine.stats.counters['veg.trees'] = scatter.trees.count;
@@ -212,7 +224,7 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
         canopyTex,
         seed,
         ablate.has('gi') ? null : gi,
-        featurePlan.exclusions,
+        scatterExclusions,
       );
       ring.init(lib.atlases.get('beech') ?? null);
       engine.scene.add(ring.group);
@@ -324,7 +336,7 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
         ctx.hooks.initialPoseMode = featureSpawn.mode;
         engine.camera.position.set(...featureSpawn.position);
       } else {
-        const spawn = findWalkSpawn(hf);
+        const spawn = defaultWalkSpawn;
         ctx.hooks.initialPose = {
           p: [spawn.x, hf.heightAtCpu(spawn.x, spawn.z) + 1.7, spawn.z],
           yaw: -0.78, // face NE — the serrated massif anchors the first frame
@@ -348,19 +360,63 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
  * central-difference slope under ~19°).
  */
 function findWalkSpawn(hf: Heightfield): { x: number; z: number } {
-  for (let r = 0; r <= 240; r += 12) {
-    const steps = Math.max(1, Math.round((2 * Math.PI * r) / 18));
+  let driestFallback: { x: number; z: number; slope: number } | null = null;
+  const inspect = (x: number, z: number): { x: number; z: number; slope: number } | null => {
+    // A dry point right on a lake bank still opens with a transparent water
+    // sheet across most of the view. Require a small dry neighbourhood.
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      const px = x + Math.cos(a) * 240;
+      const pz = z + Math.sin(a) * 240;
+      if (hf.waterYAtCpu(px, pz) > hf.heightAtCpu(px, pz) - 0.12) return null;
+    }
+    const h = hf.heightAtCpu(x, z);
+    if (hf.waterYAtCpu(x, z) > h - 0.12) return null;
+    const sx = hf.heightAtCpu(x + 6, z) - hf.heightAtCpu(x - 6, z);
+    const sz = hf.heightAtCpu(x, z + 6) - hf.heightAtCpu(x, z - 6);
+    return { x, z, slope: Math.hypot(sx, sz) / 12 };
+  };
+
+  // Artificial pads already suppress trees, bushes, grass and micro relief.
+  // Prefer one when present so controllable/settled recipes open on a clear,
+  // legible surface instead of inside procedurally scattered foliage.
+  for (const pad of hf.mp.surfaceLayout.pads) {
+    const candidate = inspect(pad.center[0], pad.center[1]);
+    if (candidate === null) continue;
+    if (driestFallback === null || candidate.slope < driestFallback.slope) {
+      driestFallback = candidate;
+    }
+    if (candidate.slope <= 0.35) return candidate;
+  }
+
+  const pathPoints = hf.mp.surfaceLayout.paths
+    .flatMap((path) => path.points)
+    .sort((a, b) => Math.hypot(a[0], a[1]) - Math.hypot(b[0], b[1]));
+  for (const point of pathPoints) {
+    const candidate = inspect(point[0], point[1]);
+    if (candidate === null) continue;
+    if (driestFallback === null || candidate.slope < driestFallback.slope) {
+      driestFallback = candidate;
+    }
+    if (candidate.slope <= 0.35) return candidate;
+  }
+
+  // Basin recipes can flood their central few hundred metres. Search through
+  // the basin rim, and retain a dry fallback instead of returning wet (0, 0).
+  for (let r = 0; r <= 1400; r += 20) {
+    const steps = Math.max(1, Math.round((2 * Math.PI * r) / 24));
     for (let k = 0; k < steps; k++) {
       const a = (k / steps) * Math.PI * 2;
       const x = Math.cos(a) * r;
       const z = Math.sin(a) * r;
-      const h = hf.heightAtCpu(x, z);
-      if (hf.waterYAtCpu(x, z) > h - 0.05) continue; // wet or waterline
-      const sx = hf.heightAtCpu(x + 6, z) - hf.heightAtCpu(x - 6, z);
-      const sz = hf.heightAtCpu(x, z + 6) - hf.heightAtCpu(x, z - 6);
-      if (Math.hypot(sx, sz) / 12 > 0.35) continue; // too steep
-      return { x, z };
+      const candidate = inspect(x, z);
+      if (candidate === null) continue;
+      if (driestFallback === null || candidate.slope < driestFallback.slope) {
+        driestFallback = candidate;
+      }
+      if (candidate.slope > 0.35) continue; // too steep
+      return candidate;
     }
   }
-  return { x: 0, z: 0 };
+  return driestFallback ?? { x: 0, z: 0 };
 }

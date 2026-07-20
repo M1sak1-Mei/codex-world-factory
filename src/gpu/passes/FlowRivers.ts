@@ -30,6 +30,7 @@ import {
   instancedArray,
   max,
   min,
+  mix,
   smoothstep,
   uint,
   vec2,
@@ -150,24 +151,34 @@ export async function runFlowRivers(
     // fade enforcement across the lake exactly like the synthesis trench,
     // otherwise we'd cut the outlet sill and drain the lake
     const dLake = wpos.sub(vec2(opts.mp.lakeC[0], opts.mp.lakeC[1])).length();
-    const tLake = smoothstep(opts.mp.lakeR, opts.mp.lakeR * 0.25, dLake);
+    const tLake = smoothstep(opts.mp.lakeR, opts.mp.lakeR * 0.25, dLake)
+      .mul(opts.mp.foundation.lakeBasin);
     const trenchFade = smoothstep(0.5, 0.12, tLake);
     // V-profile: deepest at the centerline, rim allowance rises smoothly —
     // a hard select() at fixed distance cut razor-walled rectangular canyons.
     // Beyond the rim the ceiling exceeds local terrain → constraint inactive.
     const mainProf = smoothstep(34, 4, vf.valleyDist);
     const tribProf = smoothstep(14, 1.5, vf.tribDist);
-    const enforced = min(
-      vf.valleyFloor
-        .sub(float(15.2).mul(trenchFade).mul(mainProf))
-        .add(mainProf.oneMinus().mul(46))
-        .add(max(vf.valleyDist.sub(30), 0).mul(3)),
-      vf.tribFloor
-        .add(0.4)
-        .add(tribProf.oneMinus().mul(30))
-        .add(max(vf.tribDist.sub(12), 0).mul(3)),
+    const mainCeiling = vf.valleyFloor
+      .sub(float(15.2).mul(trenchFade).mul(mainProf))
+      .add(mainProf.oneMinus().mul(46))
+      .add(max(vf.valleyDist.sub(30), 0).mul(3));
+    const tribCeiling = vf.tribFloor
+      .add(0.4)
+      .add(tribProf.oneMinus().mul(30))
+      .add(max(vf.tribDist.sub(12), 0).mul(3));
+    const current = height.element(i);
+    const controlledMain = mix(
+      current,
+      min(current, mainCeiling),
+      opts.mp.foundation.mainValley,
     );
-    height.element(i).assign(min(height.element(i), enforced));
+    const controlledTrib = mix(
+      current,
+      min(current, tribCeiling),
+      opts.mp.foundation.tributary,
+    );
+    height.element(i).assign(min(controlledMain, controlledTrib));
   })().compute(N);
   enforceK.setName('channelEnforce');
   await renderer.computeAsync([initMisc, enforceK]);

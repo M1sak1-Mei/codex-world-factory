@@ -55,17 +55,42 @@ export interface GaussianStamp {
   hardness: number;
 }
 
+/**
+ * Weights for the original LAAS macro-terrain skeleton. Recipes own these
+ * controls so a new composition can replace the fixed massif/karst layout,
+ * instead of merely adding Gaussian stamps on top of the same two mountains.
+ */
+export interface TerrainFoundation {
+  alpineMassif: number;
+  karstPlateau: number;
+  lakeBasin: number;
+  mainValley: number;
+  tributary: number;
+  outerRanges: number;
+}
+
 export interface TerrainRecipe {
   id: TerrainRecipeId;
   label: string;
   description: string;
+  foundation: Readonly<TerrainFoundation>;
   stamps: readonly GaussianStampSpec[];
 }
+
+const ORIGINAL_FOUNDATION: Readonly<TerrainFoundation> = {
+  alpineMassif: 1,
+  karstPlateau: 1,
+  lakeBasin: 1,
+  mainValley: 1,
+  tributary: 1,
+  outerRanges: 1,
+};
 
 const LAAS: TerrainRecipe = {
   id: 'laas',
   label: 'LAAS original',
   description: 'The original hand-composed massif, karst plateau, valley, and lake.',
+  foundation: ORIGINAL_FOUNDATION,
   stamps: [],
 };
 
@@ -73,6 +98,14 @@ const FOLDED_RANGES: TerrainRecipe = {
   id: 'folded-ranges',
   label: 'Folded ranges',
   description: 'Three long, offset mountain folds create layered horizons and sheltered valleys.',
+  foundation: {
+    alpineMassif: 0.18,
+    karstPlateau: 0.08,
+    lakeBasin: 0.5,
+    mainValley: 0.58,
+    tributary: 0.08,
+    outerRanges: 0.9,
+  },
   stamps: [
     {
       id: 'north-fold',
@@ -117,6 +150,14 @@ const RIFT_VALLEY: TerrainRecipe = {
   id: 'rift-valley',
   label: 'Rift valley',
   description: 'A broad diagonal rift with hard shoulders reinforces the designed drainage spine.',
+  foundation: {
+    alpineMassif: 0.08,
+    karstPlateau: 0,
+    lakeBasin: 0.12,
+    mainValley: 1,
+    tributary: 0,
+    outerRanges: 0.6,
+  },
   stamps: [
     {
       id: 'rift-floor',
@@ -161,6 +202,14 @@ const CALDERA_LAKE: TerrainRecipe = {
   id: 'caldera-lake',
   label: 'Caldera lake',
   description: 'Nested positive and negative Gaussians form a breached caldera above the main outlet.',
+  foundation: {
+    alpineMassif: 0,
+    karstPlateau: 0,
+    lakeBasin: 0.12,
+    mainValley: 0.3,
+    tributary: 0,
+    outerRanges: 0.72,
+  },
   stamps: [
     {
       id: 'caldera-mass',
@@ -205,6 +254,14 @@ const ROLLING_LOWLANDS: TerrainRecipe = {
   id: 'rolling-lowlands',
   label: 'Rolling lowlands',
   description: 'Long gentle swells, shallow hollows, and open low country for forests and farmland.',
+  foundation: {
+    alpineMassif: 0,
+    karstPlateau: 0,
+    lakeBasin: 0.28,
+    mainValley: 0.38,
+    tributary: 0,
+    outerRanges: 0.22,
+  },
   stamps: [
     {
       id: 'west-swell', center: [-850, 250], sigma: [1100, 650], rotation: 0.35,
@@ -228,6 +285,14 @@ const BASIN_COUNTRY: TerrainRecipe = {
   id: 'basin-country',
   label: 'Basin country',
   description: 'A broad inhabited basin ringed by asymmetric uplands and drainage saddles.',
+  foundation: {
+    alpineMassif: 0,
+    karstPlateau: 0,
+    lakeBasin: 0.2,
+    mainValley: 0.3,
+    tributary: 0,
+    outerRanges: 0.28,
+  },
   stamps: [
     {
       id: 'main-basin', center: [80, 120], sigma: [1050, 850], rotation: 0.18,
@@ -251,6 +316,14 @@ const DESERT_MESAS: TerrainRecipe = {
   id: 'desert-mesas',
   label: 'Desert mesas',
   description: 'Separated hard tablelands rise above a broad dry plain.',
+  foundation: {
+    alpineMassif: 0,
+    karstPlateau: 0,
+    lakeBasin: 0,
+    mainValley: 0.08,
+    tributary: 0,
+    outerRanges: 0.38,
+  },
   stamps: [
     {
       id: 'west-mesa', center: [-920, 180], sigma: [520, 360], rotation: 0.25,
@@ -274,6 +347,14 @@ const GLACIAL_UPLANDS: TerrainRecipe = {
   id: 'glacial-uplands',
   label: 'Glacial uplands',
   description: 'High shoulders and a long scooped trough create a snow-country composition.',
+  foundation: {
+    alpineMassif: 0.22,
+    karstPlateau: 0,
+    lakeBasin: 0.22,
+    mainValley: 0.72,
+    tributary: 0,
+    outerRanges: 1,
+  },
   stamps: [
     {
       id: 'upland-mass', center: [180, -260], sigma: [1450, 1100], rotation: -0.2,
