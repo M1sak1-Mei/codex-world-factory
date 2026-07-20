@@ -17,11 +17,16 @@ import type {
   SurfacePathKind,
 } from '../../../../world/LandscapeSurface';
 
-interface PathSample {
+export interface PathSample {
   x: number;
   z: number;
   distance: number;
 }
+
+const ROAD_CLEARANCE = 0.24;
+const ROAD_MAX_GRADE = 0.025;
+const ROAD_MAX_FILL = 2.5;
+const ROAD_SHOULDER_CLEARANCE = 0.05;
 
 function pavementTexture(kind: SurfacePathKind): CanvasTexture {
   const canvas = document.createElement('canvas');
@@ -124,7 +129,120 @@ export function resampleSurfacePath(
   return samples;
 }
 
-function buildPathGeometry(path: SurfacePath, terrain: TerrainSurface): BufferGeometry {
+function pathSide(samples: readonly PathSample[], index: number): [number, number] {
+  const sample = samples[index];
+  if (!sample) return [0, 1];
+  const prev = samples[Math.max(0, index - 1)] ?? sample;
+  const next = samples[Math.min(samples.length - 1, index + 1)] ?? sample;
+  const length = Math.max(Math.hypot(next.x - prev.x, next.z - prev.z), 1e-5);
+  return [-(next.z - prev.z) / length, (next.x - prev.x) / length];
+}
+
+/**
+ * Builds a bounded fill-only elevation profile that clears the complete road
+ * width and targets maxGrade without raising any station by more than the
+ * earthwork budget. Cross sections share one elevation, so a wide road stays
+ * rigid instead of copying every small terrain undulation.
+ */
+export function buildRoadElevationProfile(
+  samples: readonly PathSample[],
+  halfWidth: number,
+  terrain: TerrainSurface,
+  maxGrade = ROAD_MAX_GRADE,
+): number[] {
+  if (samples.length === 0) return [];
+  const crossSamples = Math.max(2, Math.ceil((halfWidth * 2) / 3));
+  const required = samples.map((sample, index) => {
+    const [sideX, sideZ] = pathSide(samples, index);
+    let elevation = Number.NEGATIVE_INFINITY;
+    for (let j = 0; j <= crossSamples; j++) {
+      const offset = (j / crossSamples * 2 - 1) * halfWidth;
+      elevation = Math.max(
+        elevation,
+        terrain.heightAt(sample.x + sideX * offset, sample.z + sideZ * offset),
+      );
+    }
+    return elevation + ROAD_CLEARANCE;
+  });
+
+  const first = samples[0];
+  const last = samples[samples.length - 1];
+  const closed = !!first && !!last && Math.hypot(last.x - first.x, last.z - first.z) < 0.01;
+  const totalDistance = last?.distance ?? 0;
+  return samples.map((sample, index) => {
+    let elevation = required[index] ?? 0;
+    for (let source = 0; source < samples.length; source++) {
+      const sourceSample = samples[source];
+      const sourceElevation = required[source];
+      if (!sourceSample || sourceElevation === undefined) continue;
+      let distance = Math.abs(sample.distance - sourceSample.distance);
+      if (closed && totalDistance > 0) distance = Math.min(distance, totalDistance - distance);
+      elevation = Math.max(elevation, sourceElevation - maxGrade * distance);
+    }
+    return Math.min(elevation, (required[index] ?? elevation) + ROAD_MAX_FILL);
+  });
+}
+
+function pointSegmentDistance(
+  x: number,
+  z: number,
+  a: readonly [number, number],
+  b: readonly [number, number],
+): number {
+  const dx = b[0] - a[0];
+  const dz = b[1] - a[1];
+  const lengthSq = dx * dx + dz * dz;
+  if (lengthSq <= 1e-8) return Math.hypot(x - a[0], z - a[1]);
+  const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / lengthSq));
+  return Math.hypot(x - (a[0] + dx * t), z - (a[1] + dz * t));
+}
+
+export function surfacePathContainsPoint(
+  path: SurfacePath,
+  x: number,
+  z: number,
+  margin = 0,
+): boolean {
+  const radius = path.width * 0.82 + margin;
+  for (let segment = 0; segment < path.points.length - 1; segment++) {
+    const a = path.points[segment];
+    const b = path.points[segment + 1];
+    if (a && b && pointSegmentDistance(x, z, a, b) <= radius) return true;
+  }
+  return false;
+}
+
+export function surfacePadContainsPoint(
+  pad: SurfacePad,
+  x: number,
+  z: number,
+  margin = 0,
+): boolean {
+  const ca = Math.cos(pad.rotation);
+  const sa = Math.sin(pad.rotation);
+  const dx = x - pad.center[0];
+  const dz = z - pad.center[1];
+  const localX = dx * ca + dz * sa;
+  const localZ = dz * ca - dx * sa;
+  return Math.abs(localX) <= pad.halfSize[0] + margin
+    && Math.abs(localZ) <= pad.halfSize[1] + margin;
+}
+
+type SurfaceOccluder = SurfacePath | SurfacePad;
+
+function isOccluded(x: number, z: number, occluders: readonly SurfaceOccluder[]): boolean {
+  return occluders.some((surface) => (
+    'points' in surface
+      ? surfacePathContainsPoint(surface, x, z, 0.45)
+      : surfacePadContainsPoint(surface, x, z, 0.45)
+  ));
+}
+
+function buildPathGeometry(
+  path: SurfacePath,
+  terrain: TerrainSurface,
+  occluders: readonly SurfaceOccluder[],
+): BufferGeometry {
   const samples = resampleSurfacePath(path.points);
   const halfWidth = path.width * 0.82;
   const crossSegments = Math.max(4, Math.ceil((halfWidth * 2) / 2));
@@ -133,21 +251,18 @@ function buildPathGeometry(path: SurfacePath, terrain: TerrainSurface): BufferGe
   const uvs: number[] = [];
   const indices: number[] = [];
   const uvScale = path.kind === 'cobble' ? 16 : 32;
+  const elevations = buildRoadElevationProfile(samples, halfWidth, terrain);
 
   for (let i = 0; i < samples.length; i++) {
     const sample = samples[i];
     if (!sample) continue;
-    const prev = samples[Math.max(0, i - 1)] ?? sample;
-    const next = samples[Math.min(samples.length - 1, i + 1)] ?? sample;
-    const length = Math.max(Math.hypot(next.x - prev.x, next.z - prev.z), 1e-5);
-    const sideX = -(next.z - prev.z) / length;
-    const sideZ = (next.x - prev.x) / length;
+    const [sideX, sideZ] = pathSide(samples, i);
     for (let j = 0; j <= crossSegments; j++) {
       const across = j / crossSegments;
       const offset = (across * 2 - 1) * halfWidth;
       const x = sample.x + sideX * offset;
       const z = sample.z + sideZ * offset;
-      positions.push(x, terrain.heightAt(x, z) + 0.22, z);
+      positions.push(x, elevations[i] ?? terrain.heightAt(x, z) + ROAD_CLEARANCE, z);
       uvs.push(sample.distance / uvScale, offset / uvScale);
     }
   }
@@ -158,7 +273,39 @@ function buildPathGeometry(path: SurfacePath, terrain: TerrainSurface): BufferGe
       const b = a + stride;
       const c = b + 1;
       const d = a + 1;
+      const centerX = (positions[a * 3] + positions[c * 3]) * 0.5;
+      const centerZ = (positions[a * 3 + 2] + positions[c * 3 + 2]) * 0.5;
+      if (isOccluded(centerX, centerZ, occluders)) continue;
       indices.push(a, c, b, a, d, c);
+    }
+  }
+
+  // Retaining shoulders hide fill gaps where the grade-limited road sits
+  // above the original terrain. They are skipped inside higher-priority
+  // intersections along with the road top.
+  for (const edge of [0, crossSegments]) {
+    const bottomStart = positions.length / 3;
+    for (let i = 0; i < samples.length; i++) {
+      const top = i * stride + edge;
+      const sample = samples[i];
+      if (!sample) continue;
+      const [sideX, sideZ] = pathSide(samples, i);
+      const direction = edge === 0 ? -1 : 1;
+      const shoulderOffset = direction * (halfWidth + 4);
+      const x = sample.x + sideX * shoulderOffset;
+      const z = sample.z + sideZ * shoulderOffset;
+      positions.push(x, terrain.heightAt(x, z) + ROAD_SHOULDER_CLEARANCE, z);
+      uvs.push(uvs[top * 2] ?? 0, uvs[top * 2 + 1] ?? 0);
+    }
+    for (let i = 0; i < samples.length - 1; i++) {
+      const topA = i * stride + edge;
+      const topB = (i + 1) * stride + edge;
+      const bottomA = bottomStart + i;
+      const bottomB = bottomA + 1;
+      const centerX = ((positions[topA * 3] ?? 0) + (positions[topB * 3] ?? 0)) * 0.5;
+      const centerZ = ((positions[topA * 3 + 2] ?? 0) + (positions[topB * 3 + 2] ?? 0)) * 0.5;
+      if (isOccluded(centerX, centerZ, occluders)) continue;
+      indices.push(topA, topB, bottomB, topA, bottomB, bottomA);
     }
   }
 
@@ -188,7 +335,7 @@ function buildPadGeometry(pad: SurfacePad, terrain: TerrainSurface): BufferGeome
       const localZ = -halfZ + (iz / segZ) * halfZ * 2;
       const x = pad.center[0] + localX * ca - localZ * sa;
       const z = pad.center[1] + localX * sa + localZ * ca;
-      positions.push(x, terrain.heightAt(x, z) + 0.24, z);
+      positions.push(x, terrain.heightAt(x, z) + ROAD_CLEARANCE, z);
       uvs.push(localX / 32, localZ / 32);
     }
   }
@@ -224,17 +371,23 @@ export function buildPavedRoadSurfaces(
   };
 
   for (const path of layout.paths) {
-    const mesh = new Mesh(buildPathGeometry(path, terrain), materials[path.kind]);
+    const occluders: SurfaceOccluder[] = [
+      ...layout.pads,
+      ...(path.kind === 'cobble'
+        ? layout.paths.filter((candidate) => candidate.kind === 'concrete')
+        : []),
+    ];
+    const mesh = new Mesh(buildPathGeometry(path, terrain, occluders), materials[path.kind]);
     mesh.name = path.id;
     mesh.receiveShadow = true;
-    mesh.renderOrder = 1;
+    mesh.renderOrder = path.kind === 'concrete' ? 3 : 2;
     group.add(mesh);
   }
   for (const pad of layout.pads) {
     const mesh = new Mesh(buildPadGeometry(pad, terrain), materials.concrete);
     mesh.name = pad.id;
     mesh.receiveShadow = true;
-    mesh.renderOrder = 1;
+    mesh.renderOrder = 4;
     group.add(mesh);
   }
 

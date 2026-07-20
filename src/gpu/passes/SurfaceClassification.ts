@@ -144,6 +144,10 @@ export async function runSurfaceClassification(
 
     cobble.mulAssign(waterSafe);
     concrete.mulAssign(waterSafe);
+    // Materials are exclusive at junctions: concrete is the authored
+    // intersection/plaza material and therefore replaces cobble instead of
+    // blending both channels over the same texels.
+    cobble.mulAssign(concrete.oneMinus());
     const artificial = cobble.max(concrete).clamp(0, 1);
     sand.mulAssign(artificial.oneMinus());
     textureStore(

@@ -11,7 +11,13 @@ import {
 import { makeLandscapeSurfaceLayout } from '../src/world/LandscapeSurface';
 import { makeMacroParams } from '../src/world/MacroMap';
 import { TERRAIN_RECIPE_IDS } from '../src/world/TerrainRecipe';
-import { resampleSurfacePath } from '../src/generation/libraries/paved-roads/runtime/PavedRoadSurfaceRenderer';
+import {
+  buildRoadElevationProfile,
+  resampleSurfacePath,
+  surfacePadContainsPoint,
+  surfacePathContainsPoint,
+} from '../src/generation/libraries/paved-roads/runtime/PavedRoadSurfaceRenderer';
+import type { TerrainSurface } from '../src/generation/core/WorldFeature';
 
 test('balanced landscape is the default and URL controls are declarative', () => {
   const defaults = parseParams('');
@@ -132,6 +138,56 @@ test('paved road surface resampling preserves endpoints and bounded spacing', ()
     const b = samples[i];
     assert.ok(a && b && Math.hypot(b.x - a.x, b.z - a.z) <= 8);
   }
+});
+
+test('paved elevation profile is laterally clear and grade limited', () => {
+  const samples = resampleSurfacePath([[0, 0], [120, 0]], 4);
+  const terrain: TerrainSurface = {
+    heightAt: (x, z) => x * 0.04 + Math.cos(z * 0.4) * 1.8,
+    waterAt: () => -100,
+    slopeAt: () => 0,
+    reliefAt: () => 0,
+  };
+  const elevations = buildRoadElevationProfile(samples, 8, terrain, 0.025);
+  for (let i = 0; i < samples.length; i++) {
+    const sample = samples[i];
+    const elevation = elevations[i];
+    assert.ok(sample && elevation !== undefined);
+    assert.ok(elevation >= terrain.heightAt(sample.x, -8) + 0.23);
+    assert.ok(elevation >= terrain.heightAt(sample.x, 8) + 0.23);
+    if (i > 0) {
+      const previous = samples[i - 1];
+      const previousElevation = elevations[i - 1];
+      assert.ok(previous && previousElevation !== undefined);
+      const grade = Math.abs(elevation - previousElevation) / (sample.distance - previous.distance);
+      assert.ok(grade <= 0.025001);
+    }
+  }
+});
+
+test('paved intersection predicates support exclusive material clipping', () => {
+  assert.equal(surfacePathContainsPoint({
+    id: 'cross',
+    kind: 'concrete',
+    points: [[-20, 0], [20, 0]],
+    width: 5,
+    strength: 1,
+  }, 0, 3), true);
+  assert.equal(surfacePathContainsPoint({
+    id: 'cross',
+    kind: 'concrete',
+    points: [[-20, 0], [20, 0]],
+    width: 5,
+    strength: 1,
+  }, 0, 6), false);
+  assert.equal(surfacePadContainsPoint({
+    id: 'plaza',
+    kind: 'concrete',
+    center: [10, 20],
+    halfSize: [8, 4],
+    rotation: Math.PI * 0.5,
+    strength: 1,
+  }, 13, 20), true);
 });
 
 test('expanded terrain and tree catalogues are unique', () => {
