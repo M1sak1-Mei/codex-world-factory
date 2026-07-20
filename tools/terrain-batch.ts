@@ -186,7 +186,7 @@ function usage(): string {
     '  --shots 1,5,9',
     '  --preset low|high|ultra',
     '  --world wilderness|magic-forest-ruins|fantasy-city',
-    '  --landscape legacy|balanced|wild|settled|arid|alpine',
+    '  --landscape legacy|balanced|wild|settled|paved|arid|alpine',
     '  --include hills,plains,forest,flowers,cobble',
     '  --exclude desert,snow,concrete',
     '  --time 11',

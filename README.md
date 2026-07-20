@@ -264,7 +264,7 @@ http://localhost:5173/?world=fantasy-city&terrain=laas&seed=84&preset=low
 |---|---|---|
 | `seed` | `42` | 世界主种子。 |
 | `terrain` | `folded-ranges` | 地形配方。 |
-| `landscape` | `balanced` / `wild` / `settled` / `arid` / `alpine` / `legacy` | 地貌、生态和地表预设。 |
+| `landscape` | `balanced` / `wild` / `settled` / `paved` / `arid` / `alpine` / `legacy` | 地貌、生态和地表预设。 |
 | `include` | `plains,forest,flowers,cobble` | 强制启用的景观标签，逗号分隔。 |
 | `exclude` | `desert,snow,concrete` | 禁止生成的景观标签；优先级最高。 |
 | `world` | `magic-forest-ruins` | 顶层世界内容组合。 |
@@ -566,6 +566,9 @@ http://localhost:5173/?terrain=laas&landscape=balanced&seed=42&preset=low
 # 无固定中央山体的滚动低地案例：丘陵、平原、森林、草甸和花，明确禁用高山
 http://localhost:5173/?terrain=rolling-lowlands&landscape=balanced&include=hills,plains,forest,meadow,grass,flowers&exclude=mountains,desert,snow,cobble,concrete&seed=137&preset=low&alt=220&x=-700&z=700&yaw=-0.785&pitch=-0.28
 
+# 大规模铺装路网：石质主轴、混凝土横轴、环路、放射支路和广场
+http://localhost:5173/?terrain=rolling-lowlands&landscape=paved&exclude=desert,snow&seed=84&preset=low&alt=320&x=0&z=0&yaw=-0.78&pitch=-1.05&freeze=1
+
 # 沙漠台地，不生成森林、雪地、花和人工地坪
 http://localhost:5173/?terrain=desert-mesas&landscape=arid&include=desert&exclude=forest,snow,flowers,cobble,concrete&seed=17&preset=low
 
@@ -584,6 +587,7 @@ http://localhost:5173/?terrain=laas&landscape=legacy&seed=42&preset=low
 | `balanced` | 新默认值；森林、草甸、丘陵、平原、盆地和少量沙地/铺装混合。 |
 | `wild` | 更强地形起伏、扭曲、森林和灌木，关闭人工铺装。 |
 | `settled` | 更平缓、更开阔，增加草地、花、石板路和水泥地坪，适合城镇。 |
+| `paved` | 大尺度铺装路网：石质主轴、混凝土横轴、环路、四条放射支路、中央广场与道路节点。 |
 | `arid` | 干旱、低植被、高沙地权重，适合荒漠和台地。 |
 | `alpine` | 更强山体、岩石细节和积雪，减少平原和低地植被。 |
 
@@ -613,6 +617,8 @@ http://localhost:5173/?terrain=laas&landscape=legacy&seed=42&preset=low
 - 地表分类新增独立 `surfaceTex`：R/G/B/A 分别表示沙地、石板路、水泥地和任意人工地面。
   地形材质、微位移、树木散布、灌木/花散布和相机周围草地共同消费这张纹理，
   所以道路不会重新长满树草，水泥地也不会继承岩石微位移。
+- `paved` 路网由独立纯数据生成器输出 `SurfacePath` / `SurfacePad`，贴地网格运行时再消费同一布局；
+  生成器不依赖 Three.js/WebGPU，渲染器也不负责路网规划，后续可以独立替换道路语法或铺装材质。
 - 树木目录由 6 种扩展到 8 种：云杉、松树、山毛榉、白桦、喀斯特曲木、枯立木、
   古橡树和河岸柳树。现有榛树灌木、粉花灌木、杜松、蕨类、伞形花、铃形花和雏菊继续保留，
   且草、灌木、花可以分别包含或排除。

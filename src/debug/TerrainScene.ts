@@ -30,6 +30,7 @@ import { Clouds } from '../sky/Clouds';
 import { SunSky } from '../sky/SunSky';
 import { createDefaultWorldFeatureRegistry } from '../generation/DefaultWorldFeatures';
 import { heightfieldTerrainSurface } from '../generation/integrations/HeightfieldTerrainSurface';
+import { buildPavedRoadSurfaces } from '../generation/libraries/paved-roads/runtime/PavedRoadSurfaceRenderer';
 import { WORLD_HALF } from '../world/WorldConst';
 import { buildHorizontalCollisionProbe } from '../core/Collision';
 import { worldRecipe } from '../generation/core/WorldRecipe';
@@ -181,6 +182,17 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
       tiles.update(engine.camera);
       engine.stats.counters['terrain.tiles'] = tiles.activeTiles;
     });
+  }
+
+  if (
+    view === null &&
+    hf.mp.landscape.surfaces.layout === 'paved-network' &&
+    !ablate.has('paving')
+  ) {
+    const paving = buildPavedRoadSurfaces(hf.mp.surfaceLayout, terrainSurface);
+    engine.scene.add(paving);
+    engine.stats.counters['paving.paths'] = hf.mp.surfaceLayout.paths.length;
+    engine.stats.counters['paving.pads'] = hf.mp.surfaceLayout.pads.length;
   }
 
   // Phase 6: stream/lake water clipmap (?ablate=water to A/B)

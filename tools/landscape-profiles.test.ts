@@ -11,6 +11,7 @@ import {
 import { makeLandscapeSurfaceLayout } from '../src/world/LandscapeSurface';
 import { makeMacroParams } from '../src/world/MacroMap';
 import { TERRAIN_RECIPE_IDS } from '../src/world/TerrainRecipe';
+import { resampleSurfacePath } from '../src/generation/libraries/paved-roads/runtime/PavedRoadSurfaceRenderer';
 
 test('balanced landscape is the default and URL controls are declarative', () => {
   const defaults = parseParams('');
@@ -25,6 +26,7 @@ test('balanced landscape is the default and URL controls are declarative', () =>
   assert.deepEqual(requested.landscapeInclude, ['plains', 'flowers', 'cobble']);
   assert.deepEqual(requested.landscapeExclude, ['desert', 'snow']);
   assert.equal(parseLandscapeProfileId('unknown'), 'balanced');
+  assert.equal(parseLandscapeProfileId('paved'), 'paved');
   assert.deepEqual(parseLandscapeTags('forest, forest,NOPE,hills'), ['forest', 'hills']);
 });
 
@@ -83,6 +85,53 @@ test('artificial-ground layouts are deterministic and seed isolated', () => {
   assert.ok(a.pads.length >= 1);
   assert.ok(a.paths.every((path) => path.points.length >= 4 && path.width > 0));
   assert.ok(a.pads.every((pad) => pad.halfSize[0] > 0 && pad.halfSize[1] > 0));
+});
+
+test('paved profile emits a large connected mixed-material road network', () => {
+  const paved = resolveLandscapeProfile('paved');
+  const a = makeLandscapeSurfaceLayout(new WorldSeed(84), paved);
+  const b = makeLandscapeSurfaceLayout(new WorldSeed(84), paved);
+  assert.deepEqual(a, b);
+  assert.equal(a.paths.length, 7);
+  assert.equal(a.pads.length, 7);
+  assert.deepEqual(new Set(a.paths.map((path) => path.kind)), new Set(['cobble', 'concrete']));
+
+  const boulevard = a.paths.find((path) => path.id === 'paved/boulevard');
+  const orbital = a.paths.find((path) => path.id === 'paved/orbital');
+  assert.ok(boulevard && boulevard.width >= 18 && boulevard.points.length === 9);
+  assert.ok(orbital && orbital.points.length === 17);
+  assert.deepEqual(orbital.points[0], orbital.points[orbital.points.length - 1]);
+  assert.ok(
+    a.paths.flatMap((path) => path.points).every(([x, z]) => Math.abs(x) < 2048 && Math.abs(z) < 2048),
+  );
+  assert.equal(new Set([...a.paths, ...a.pads].map((primitive) => primitive.id)).size, 14);
+});
+
+test('paved material exclusions remove only their own primitives', () => {
+  const noCobble = makeLandscapeSurfaceLayout(
+    new WorldSeed(84),
+    resolveLandscapeProfile('paved', [], ['cobble']),
+  );
+  assert.ok(noCobble.paths.length > 0);
+  assert.ok(noCobble.paths.every((path) => path.kind === 'concrete'));
+  assert.ok(noCobble.pads.length > 0);
+
+  const noArtificial = makeLandscapeSurfaceLayout(
+    new WorldSeed(84),
+    resolveLandscapeProfile('paved', [], ['cobble', 'concrete']),
+  );
+  assert.deepEqual(noArtificial, { paths: [], pads: [] });
+});
+
+test('paved road surface resampling preserves endpoints and bounded spacing', () => {
+  const samples = resampleSurfacePath([[0, 0], [25, 0], [25, 17]], 8);
+  assert.deepEqual(samples[0], { x: 0, z: 0, distance: 0 });
+  assert.deepEqual(samples[samples.length - 1], { x: 25, z: 17, distance: 42 });
+  for (let i = 1; i < samples.length; i++) {
+    const a = samples[i - 1];
+    const b = samples[i];
+    assert.ok(a && b && Math.hypot(b.x - a.x, b.z - a.z) <= 8);
+  }
 });
 
 test('expanded terrain and tree catalogues are unique', () => {

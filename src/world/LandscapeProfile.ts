@@ -9,6 +9,7 @@ export const LANDSCAPE_PROFILE_IDS = [
   'balanced',
   'wild',
   'settled',
+  'paved',
   'arid',
   'alpine',
 ] as const;
@@ -60,6 +61,7 @@ export interface LandscapeSurfaceControls {
   sand: number;
   cobble: number;
   concrete: number;
+  layout: 'none' | 'organic' | 'paved-network';
 }
 
 export interface ResolvedLandscapeProfile {
@@ -98,7 +100,7 @@ const LEGACY: LandscapePreset = {
     shrubs: 1,
     flowers: 1,
   },
-  surfaces: { sand: 0, cobble: 0, concrete: 0 },
+  surfaces: { sand: 0, cobble: 0, concrete: 0, layout: 'none' },
 };
 
 const PRESETS: Readonly<Record<LandscapeProfileId, LandscapePreset>> = {
@@ -124,7 +126,7 @@ const PRESETS: Readonly<Record<LandscapeProfileId, LandscapePreset>> = {
       shrubs: 1.1,
       flowers: 1.18,
     },
-    surfaces: { sand: 0.38, cobble: 0.72, concrete: 0.32 },
+    surfaces: { sand: 0.38, cobble: 0.72, concrete: 0.32, layout: 'organic' },
   },
   wild: {
     noise: {
@@ -147,7 +149,7 @@ const PRESETS: Readonly<Record<LandscapeProfileId, LandscapePreset>> = {
       shrubs: 1.25,
       flowers: 0.9,
     },
-    surfaces: { sand: 0.18, cobble: 0, concrete: 0 },
+    surfaces: { sand: 0.18, cobble: 0, concrete: 0, layout: 'none' },
   },
   settled: {
     noise: {
@@ -170,7 +172,30 @@ const PRESETS: Readonly<Record<LandscapeProfileId, LandscapePreset>> = {
       shrubs: 0.72,
       flowers: 1.25,
     },
-    surfaces: { sand: 0.2, cobble: 1.25, concrete: 1.1 },
+    surfaces: { sand: 0.2, cobble: 1.25, concrete: 1.1, layout: 'organic' },
+  },
+  paved: {
+    noise: {
+      macroScale: 1.35,
+      hills: 0.34,
+      plains: 1.55,
+      basins: 0.2,
+      mountains: 0.12,
+      detailScale: 1.4,
+      detailAmplitude: 0.38,
+      warp: 0.28,
+    },
+    ecology: {
+      forest: 0.45,
+      meadow: 0.9,
+      wetland: 0.3,
+      desert: 0.08,
+      snow: 0,
+      grass: 0.82,
+      shrubs: 0.32,
+      flowers: 0.55,
+    },
+    surfaces: { sand: 0.08, cobble: 1.6, concrete: 1.45, layout: 'paved-network' },
   },
   arid: {
     noise: {
@@ -193,7 +218,7 @@ const PRESETS: Readonly<Record<LandscapeProfileId, LandscapePreset>> = {
       shrubs: 0.52,
       flowers: 0.14,
     },
-    surfaces: { sand: 1.55, cobble: 0.25, concrete: 0.12 },
+    surfaces: { sand: 1.55, cobble: 0.25, concrete: 0.12, layout: 'organic' },
   },
   alpine: {
     noise: {
@@ -216,7 +241,7 @@ const PRESETS: Readonly<Record<LandscapeProfileId, LandscapePreset>> = {
       shrubs: 0.72,
       flowers: 0.5,
     },
-    surfaces: { sand: 0, cobble: 0.12, concrete: 0 },
+    surfaces: { sand: 0, cobble: 0.12, concrete: 0, layout: 'organic' },
   },
 };
 

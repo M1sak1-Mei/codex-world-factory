@@ -198,7 +198,9 @@ export class Heightfield {
     progress(0.91, 'terrain: natural + artificial surface classification');
     hf.surfaceTex = await runSurfaceClassification(renderer, hf.height, {
       res: hf.res,
+      waterRes: hf.simRes,
       mp,
+      waterY: hf.waterY,
       normalTex: hf.normalTex,
       fieldsTex: hf.fieldsTex,
       biomeTex: hf.biomeTex,
