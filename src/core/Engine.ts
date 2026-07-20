@@ -12,6 +12,7 @@ import { installPositionInvariance } from '../render/VegPrepass';
 import { GpuProfiler } from './GpuProfiler';
 import type { EngineStats, LaasHooks } from './Hooks';
 import type { LaasParams } from './Params';
+import { CAMERA_FAR, CAMERA_NEAR } from './CameraTuning';
 
 export type UpdateFn = (dt: number, worldTime: number) => void;
 
@@ -51,8 +52,8 @@ export class Engine {
     this.camera = new PerspectiveCamera(
       55,
       window.innerWidth / window.innerHeight,
-      0.3,
-      30000,
+      CAMERA_NEAR,
+      CAMERA_FAR,
     );
     this.camera.position.set(0, 10, 30);
     this.stats = {

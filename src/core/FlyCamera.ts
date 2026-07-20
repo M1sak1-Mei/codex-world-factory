@@ -15,6 +15,7 @@ import type { PerspectiveCamera } from 'three';
 import { Vector3 } from 'three';
 import type { CamPose } from './Hooks';
 import type { HorizontalCollisionProbe } from './Collision';
+import { FLY_GROUND_CLEAR } from './CameraTuning';
 
 const FORWARD = new Vector3();
 const RIGHT = new Vector3();
@@ -44,7 +45,6 @@ const SPRINT_FOV_ADD = 6; // deg
 const DIP_K = 150; // landing-dip spring stiffness
 const DIP_C = 18; // landing-dip spring damping
 // fly-mode soft collision (legacy contract from TerrainScene)
-const FLY_GROUND_CLEAR = 1.4;
 const WADE_CLEAR = 0.45; // eye stays above water (no underwater rendering)
 const PLAYER_RADIUS = 0.38;
 // Browsers enforce a cooldown (~1.25 s in Chromium) after the user exits

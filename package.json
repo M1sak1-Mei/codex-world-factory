@@ -15,7 +15,7 @@
     "test:terrain": "tsx --test tools/terrain-recipes.test.ts",
     "test:landscape": "tsx --test tools/landscape-profiles.test.ts",
     "test:city": "tsx --test tools/city-buildings.test.ts",
-    "test:world": "tsx --test tools/terrain-recipes.test.ts tools/landscape-profiles.test.ts tools/world-features.test.ts tools/city-buildings.test.ts",
+    "test:world": "tsx --test tools/camera-ground.test.ts tools/terrain-recipes.test.ts tools/landscape-profiles.test.ts tools/world-features.test.ts tools/city-buildings.test.ts",
     "compare": "tsx tools/compare.ts",
     "battery": "tsx tools/battery.ts"
   },
