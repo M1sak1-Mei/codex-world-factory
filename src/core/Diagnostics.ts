@@ -5,6 +5,15 @@
 
 import type { GpuDiagnostics } from './Hooks';
 
+/**
+ * The full terrain material currently binds 17 sampled textures. WebGPU
+ * devices default to exposing only 16 unless the application explicitly asks
+ * for a higher adapter-supported limit, which makes that material's pipeline
+ * invalid and leaves apparently transparent ground.
+ */
+export const WORLD_MIN_SAMPLED_TEXTURES = 17;
+export const WORLD_REQUESTED_SAMPLED_TEXTURES = 32;
+
 const INTERESTING_LIMITS: readonly (keyof GPUSupportedLimits & string)[] = [
   'maxTextureDimension2D',
   'maxTextureDimension3D',
@@ -30,6 +39,7 @@ export function buildRequiredLimits(d: GpuDiagnostics): Record<string, number> {
   const want: Record<string, number> = {
     maxStorageBuffersPerShaderStage: 16,
     maxStorageTexturesPerShaderStage: 8,
+    maxSampledTexturesPerShaderStage: WORLD_REQUESTED_SAMPLED_TEXTURES,
     maxBufferSize: 1 << 30,
     maxStorageBufferBindingSize: 1 << 30,
   };
@@ -39,6 +49,22 @@ export function buildRequiredLimits(d: GpuDiagnostics): Record<string, number> {
     if (adapterMax !== undefined) out[k] = Math.min(v, adapterMax);
   }
   return out;
+}
+
+/** Fail before scene construction instead of silently dropping GPU pipelines. */
+export function worldGpuLimitFailures(d: GpuDiagnostics): string[] {
+  const sampled = d.limits.maxSampledTexturesPerShaderStage;
+  if (sampled === undefined) {
+    return [
+      `maxSampledTexturesPerShaderStage was not reported (need ${WORLD_MIN_SAMPLED_TEXTURES})`,
+    ];
+  }
+  if (sampled < WORLD_MIN_SAMPLED_TEXTURES) {
+    return [
+      `maxSampledTexturesPerShaderStage=${sampled} (need ${WORLD_MIN_SAMPLED_TEXTURES})`,
+    ];
+  }
+  return [];
 }
 
 export async function probeWebGPU(): Promise<GpuDiagnostics> {

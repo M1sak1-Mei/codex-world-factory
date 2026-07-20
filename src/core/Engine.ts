@@ -6,7 +6,7 @@
 
 import { ACESFilmicToneMapping, PerspectiveCamera, Scene } from 'three';
 import { TimestampQuery, WebGPURenderer } from 'three/webgpu';
-import { buildRequiredLimits } from './Diagnostics';
+import { buildRequiredLimits, WORLD_MIN_SAMPLED_TEXTURES } from './Diagnostics';
 import { installMaterialKeyMemo } from '../render/ThreePatches';
 import { installPositionInvariance } from '../render/VegPrepass';
 import { GpuProfiler } from './GpuProfiler';
@@ -79,6 +79,15 @@ export class Engine {
     // fail-loud: surface WebGPU validation errors (otherwise: silent black frames)
     const device = (renderer.backend as unknown as { device?: GPUDevice }).device;
     if (device) {
+      const sampledTextureLimit = device.limits.maxSampledTexturesPerShaderStage;
+      if (sampledTextureLimit < WORLD_MIN_SAMPLED_TEXTURES) {
+        throw new Error(
+          `WebGPU device exposes ${sampledTextureLimit} sampled textures per shader stage; ` +
+          `the world renderer needs ${WORLD_MIN_SAMPLED_TEXTURES}`,
+        );
+      }
+      // eslint-disable-next-line no-console
+      console.log(`[laas] device sampled-texture limit=${sampledTextureLimit}`);
       let reported = 0;
       device.onuncapturederror = (e: GPUUncapturedErrorEvent): void => {
         if (reported++ < 8) {

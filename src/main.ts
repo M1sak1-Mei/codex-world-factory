@@ -7,6 +7,7 @@ import {
   failLoud,
   installGlobalErrorHooks,
   probeWebGPU,
+  worldGpuLimitFailures,
 } from './core/Diagnostics';
 import { Engine } from './core/Engine';
 import { FlyCamera } from './core/FlyCamera';
@@ -40,6 +41,15 @@ async function boot(): Promise<void> {
       '  • chrome://gpu — WebGPU should read “Hardware accelerated”',
       '  • Settings → System → hardware acceleration ON, then relaunch',
       '  • update Chrome and the GPU driver',
+    ]);
+    return;
+  }
+  const limitFailures = worldGpuLimitFailures(diag);
+  if (limitFailures.length > 0) {
+    failLoud('GPU limits are insufficient for the world renderer', [
+      ...limitFailures,
+      '',
+      'Update the browser and GPU driver, then make sure hardware acceleration is enabled.',
     ]);
     return;
   }
