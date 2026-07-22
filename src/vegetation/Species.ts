@@ -314,7 +314,23 @@ export const OAK: SpeciesParams = {
   crown: 'dome',
   asym: 0.42,
   flare: { amp: 0.82, height: 1.5, lobes: 7 },
-  barkLayer: 4,
+  foliage: BEECH.foliage
+    ? {
+        ...BEECH.foliage,
+        clusterSize: [4, 6],
+        scale: [0.14, 0.22],
+        leaf: {
+          ...BEECH.foliage.leaf,
+          len: 1.08,
+          width: 0.38,
+          shapePow: 0.9,
+          fold: 0.25,
+          curl: 0.17,
+        },
+      }
+    : null,
+  // Dedicated old-oak bark; karst gnarl remains an independent recipe.
+  barkLayer: 6,
   barkRepeats: 4,
   foliageColor: { r: 0.075, g: 0.135, b: 0.025, hueVar: 0.36 },
   stubChance: 0.07,

@@ -19,6 +19,7 @@ import { buildGalleryScene } from './debug/GalleryScene';
 import { buildSanityScene } from './debug/SanityScene';
 import { buildShadowTestScene } from './debug/ShadowTestScene';
 import { buildTerrainScene } from './debug/TerrainScene';
+import { buildHeroVegetationScene } from './debug/HeroVegetationScene';
 import { buildScene, registerScene, type WorldContext } from './debug/Scenes';
 
 async function boot(): Promise<void> {
@@ -70,6 +71,7 @@ async function boot(): Promise<void> {
   registerScene('sanity', buildSanityScene);
   registerScene('terrain', buildTerrainScene);
   registerScene('gallery', buildGalleryScene);
+  registerScene('veghero', buildHeroVegetationScene);
   registerScene('shadowtest', buildShadowTestScene);
   // 'world' becomes the streamed open world once terrain tiles land.
   registerScene('world', buildTerrainScene);

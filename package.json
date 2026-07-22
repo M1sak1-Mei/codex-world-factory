@@ -5,9 +5,9 @@
   "type": "module",
   "description": "Codex World Factory - a modular procedural fantasy world in the browser (WebGPU)",
   "scripts": {
-    "dev": "vite --port 5173 --strictPort",
+    "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview --port 5174 --strictPort",
+    "preview": "vite preview --host 127.0.0.1 --port 5174 --strictPort",
     "typecheck": "tsc --noEmit",
     "shoot": "tsx tools/shoot.ts",
     "terrain:batch": "tsx tools/terrain-batch.ts",
@@ -15,7 +15,8 @@
     "test:terrain": "tsx --test tools/terrain-recipes.test.ts",
     "test:landscape": "tsx --test tools/landscape-profiles.test.ts",
     "test:city": "tsx --test tools/city-buildings.test.ts",
-    "test:world": "tsx --test tools/camera-ground.test.ts tools/gpu-limits.test.ts tools/terrain-recipes.test.ts tools/landscape-profiles.test.ts tools/world-features.test.ts tools/city-buildings.test.ts",
+    "test:vegetation": "tsx --test tools/vegetation-tiers.test.ts",
+    "test:world": "tsx --test tools/camera-ground.test.ts tools/gpu-limits.test.ts tools/terrain-recipes.test.ts tools/landscape-profiles.test.ts tools/world-features.test.ts tools/city-buildings.test.ts tools/vegetation-tiers.test.ts",
     "compare": "tsx tools/compare.ts",
     "battery": "tsx tools/battery.ts"
   },

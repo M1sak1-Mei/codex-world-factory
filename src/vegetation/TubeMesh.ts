@@ -13,6 +13,11 @@
 import { BufferAttribute, BufferGeometry, Vector3 } from 'three';
 import type { Rng } from '../core/Seed';
 import type { SkelBranch, Skeleton } from './VegTypes';
+import type {
+  HeroBarkGeometryProfile,
+  HeroDefectProfile,
+  HeroRootProfile,
+} from './VegetationProfiles';
 
 export class MeshGrower {
   private pos: number[] = [];
@@ -115,6 +120,8 @@ export interface TubeOpts {
   swayFlexBase: number;
   swayFlexTip: number;
   hue: number;
+  /** Hero-only resolved silhouette and junction treatment. */
+  surface?: HeroBarkGeometryProfile;
 }
 
 const _N = new Vector3();
@@ -129,30 +136,57 @@ export function tubeForBranch(
   opts: TubeOpts,
   rng: Rng,
 ): void {
-  const n = br.pts.length;
-  if (n < 2) return;
+  if (br.pts.length < 2) return;
+  const pts: Vector3[] = [];
+  const radii: number[] = [];
+  const dirs: Vector3[] = [];
+  if (opts.surface) {
+    // WebGPU exposes no tessellation stage. Resolve hero bark on the CPU by
+    // adaptively sampling the growth spline; the generated buffer remains a
+    // normal instanced mesh at runtime.
+    const spacing = br.level === 0 ? 0.32 : br.level === 1 ? 0.42 : 0.62;
+    for (let si = 0; si < br.pts.length - 1; si++) {
+      const a = br.pts[si] as Vector3;
+      const b = br.pts[si + 1] as Vector3;
+      const steps = Math.max(1, Math.ceil(a.distanceTo(b) / spacing));
+      for (let j = 0; j < steps; j++) {
+        const k = j / steps;
+        pts.push(a.clone().lerp(b, k));
+        radii.push((br.radii[si] as number) * (1 - k) + (br.radii[si + 1] as number) * k);
+        dirs.push((br.dirs[si] as Vector3).clone().lerp(br.dirs[si + 1] as Vector3, k).normalize());
+      }
+    }
+    pts.push((br.pts[br.pts.length - 1] as Vector3).clone());
+    radii.push(br.radii[br.radii.length - 1] as number);
+    dirs.push((br.dirs[br.dirs.length - 1] as Vector3).clone());
+  } else {
+    pts.push(...br.pts);
+    radii.push(...br.radii);
+    dirs.push(...br.dirs);
+  }
+  const n = pts.length;
   const rings: number[][] = [];
   let lastRingPos: number[] = [];
   let firstRingPos: number[] = [];
   // initial frame
-  _T.copy(br.dirs[0] as Vector3);
+  _T.copy(dirs[0] as Vector3);
   const ref = Math.abs(_T.y) < 0.94 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0);
   _N.crossVectors(ref, _T).normalize();
   _B.crossVectors(_T, _N).normalize();
 
   const segsAround = Math.max(4, opts.ringSegs);
   let vAlong = 0;
-  const baseR = Math.max(br.radii[0] as number, 1e-4);
+  const baseR = Math.max(radii[0] as number, 1e-4);
 
   for (let i = 0; i < n; i++) {
-    const p = br.pts[i] as Vector3;
-    const r = br.radii[i] as number;
+    const p = pts[i] as Vector3;
+    const r = radii[i] as number;
     if (i > 0) {
-      const prev = br.pts[i - 1] as Vector3;
+      const prev = pts[i - 1] as Vector3;
       vAlong += _v.subVectors(p, prev).length();
       // parallel transport: rotate N,B by the rotation prev-tangent → tangent
-      const tPrev = br.dirs[i - 1] as Vector3;
-      const tCur = br.dirs[i] as Vector3;
+      const tPrev = dirs[i - 1] as Vector3;
+      const tCur = dirs[i] as Vector3;
       const axis = _v.crossVectors(tPrev, tCur);
       const s = axis.length();
       if (s > 1e-6) {
@@ -164,8 +198,8 @@ export function tubeForBranch(
     }
     const tt = i / (n - 1);
     // taper slope tilts ring normals toward the tangent
-    const rNext = br.radii[Math.min(n - 1, i + 1)] as number;
-    const rPrev = br.radii[Math.max(0, i - 1)] as number;
+    const rNext = radii[Math.min(n - 1, i + 1)] as number;
+    const rPrev = radii[Math.max(0, i - 1)] as number;
     const slope = (rPrev - rNext) * (n - 1) / Math.max(0.05, br.len) * 0.5;
     const ring: number[] = [];
     const ringPos: number[] = [];
@@ -177,17 +211,37 @@ export function tubeForBranch(
       const sa = Math.sin(a);
       let rr = r;
       if (opts.flare && br.level === 0) {
-        const h = (br.pts[i] as Vector3).y - (br.pts[0] as Vector3).y;
+        const h = (pts[i] as Vector3).y - (pts[0] as Vector3).y;
         const lobe = Math.pow(
           Math.max(0, Math.cos(opts.flare.lobes * a + opts.flare.phase)),
           1.6,
         );
         rr *= 1 + opts.flare.amp * Math.exp(-h / opts.flare.height) * (0.45 + 0.9 * lobe);
       }
+      if (opts.surface) {
+        const srf = opts.surface;
+        const branchK = br.level === 0 ? 1 : br.level === 1 ? 0.58 : 0.22;
+        const h = vAlong;
+        // A twisted ellipse breaks the generalized-cylinder read at the
+        // silhouette. Two incommensurate waves provide old-growth swelling;
+        // the powered ridge term resolves individual bark plates.
+        const elliptical = Math.cos(2 * (a + h * srf.twist)) * srf.ellipticity * branchK;
+        const swell =
+          (Math.sin(a * 3 + h * 0.61) * 0.58 + Math.sin(a * 5.1 - h * 0.37) * 0.42) *
+          srf.irregularity * branchK;
+        const ridgeRaw = Math.max(0, Math.cos(a * srf.ridgeCount + h * 1.7));
+        const ridges = (Math.pow(ridgeRaw, 4) - 0.16) * srf.microDepth * branchK;
+        rr *= Math.max(0.58, 1 + elliptical + swell + ridges);
+        if (br.level > 0) {
+          // A short swollen collar hides the hard child/parent tube seam and
+          // reads as compressed reaction wood in the branch crotch.
+          rr *= 1 + srf.junctionBlend * Math.exp(-tt * 12);
+        }
+      }
       const dx = _N.x * ca + _B.x * sa;
       const dy = _N.y * ca + _B.y * sa;
       const dz = _N.z * ca + _B.z * sa;
-      const tan = br.dirs[i] as Vector3;
+      const tan = dirs[i] as Vector3;
       let nx = dx + tan.x * slope;
       let ny = dy + tan.y * slope;
       let nz = dz + tan.z * slope;
@@ -224,8 +278,8 @@ export function tubeForBranch(
   // cap advances along −T, which flips handedness vs the wall quads — the
   // outward order here is the MIRROR of the tip-cap order.
   if (opts.capBase && baseR > 0.015) {
-    const baseP = br.pts[0] as Vector3;
-    const baseD = br.dirs[0] as Vector3;
+    const baseP = pts[0] as Vector3;
+    const baseD = dirs[0] as Vector3;
     const first = rings[0] as number[];
     const center = g.vertex(
       baseP.x - baseD.x * baseR * 0.4,
@@ -256,9 +310,9 @@ export function tubeForBranch(
 
   // cap
   const last = rings[rings.length - 1] as number[];
-  const tipP = br.pts[n - 1] as Vector3;
-  const tipD = br.dirs[n - 1] as Vector3;
-  const tipR = br.radii[n - 1] as number;
+  const tipP = pts[n - 1] as Vector3;
+  const tipD = dirs[n - 1] as Vector3;
+  const tipR = radii[n - 1] as number;
   if (br.broken && tipR > 0.015) {
     // jagged break: ring of inward spikes at randomized heights
     const center = g.vertex(
@@ -321,6 +375,8 @@ export function tubesForSkeleton(
     maxLevel?: number;
     /** keep only every Nth branch of level ≥ 1 (far-LOD bark diet) */
     branchStride?: number;
+    /** Hero-only resolved bark silhouette. */
+    surface?: HeroBarkGeometryProfile;
   },
 ): void {
   const maxLevel = opts.maxLevel ?? 99;
@@ -336,7 +392,12 @@ export function tubesForSkeleton(
       g,
       br,
       {
-        ringSegs: ringsForLevel(br.level, opts.lodK),
+        ringSegs: opts.surface
+          ? Math.max(
+              ringsForLevel(br.level, opts.lodK),
+              br.level === 0 ? 32 : br.level === 1 ? 14 : 7,
+            )
+          : ringsForLevel(br.level, opts.lodK),
         uRepeats: br.level === 0 ? opts.uRepeats : Math.max(1, Math.round(opts.uRepeats * 0.4)),
         vScale: 1,
         ...(br.level === 0 && opts.flare ? { flare: opts.flare } : {}),
@@ -344,8 +405,161 @@ export function tubesForSkeleton(
         swayFlexBase: flexB,
         swayFlexTip: flexT,
         hue: rng.float() * 2 - 1,
+        ...(opts.surface ? { surface: opts.surface } : {}),
       },
       rng,
     );
+  }
+}
+
+function pointOnBranch(br: SkelBranch, t: number): { p: Vector3; tangent: Vector3; radius: number } {
+  const f = Math.max(0, Math.min(0.9999, t)) * (br.pts.length - 1);
+  const i = Math.min(br.pts.length - 2, Math.floor(f));
+  const k = f - i;
+  return {
+    p: (br.pts[i] as Vector3).clone().lerp(br.pts[i + 1] as Vector3, k),
+    tangent: (br.dirs[i] as Vector3).clone().lerp(br.dirs[i + 1] as Vector3, k).normalize(),
+    radius: (br.radii[i] as number) * (1 - k) + (br.radii[i + 1] as number) * k,
+  };
+}
+
+/** Append old-growth knots, recessed scars, and lifted peeling-bark strips. */
+export function heroBarkDefects(
+  g: MeshGrower,
+  skel: Skeleton,
+  rng: Rng,
+  profile: HeroDefectProfile,
+): void {
+  const trunk = skel.branches.find((b) => b.level === 0);
+  if (!trunk) return;
+
+  const disc = (kind: 'knot' | 'scar', t: number, angle: number, size: number): void => {
+    const at = pointOnBranch(trunk, t);
+    const ref = Math.abs(at.tangent.y) < 0.94 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0);
+    const n = new Vector3().crossVectors(ref, at.tangent).normalize();
+    const b = new Vector3().crossVectors(at.tangent, n).normalize();
+    const radial = n.clone().multiplyScalar(Math.cos(angle)).addScaledVector(b, Math.sin(angle)).normalize();
+    const side = new Vector3().crossVectors(at.tangent, radial).normalize();
+    const base = at.p.clone().addScaledVector(radial, at.radius * (kind === 'knot' ? 0.92 : 1.003));
+    const rings: number[][] = [];
+    const RINGS = kind === 'knot' ? 4 : 2;
+    const SEGS = 12;
+    for (let ri = 0; ri <= RINGS; ri++) {
+      const s = ri / RINGS;
+      const rr = size * Math.sin(s * Math.PI * 0.5);
+      const lift = kind === 'knot' ? size * 0.75 * (1 - s * s) : -size * 0.22 * (1 - s);
+      const ring: number[] = [];
+      for (let k = 0; k <= SEGS; k++) {
+        const a = (k / SEGS) * Math.PI * 2;
+        const p = base
+          .clone()
+          .addScaledVector(side, Math.cos(a) * rr)
+          .addScaledVector(at.tangent, Math.sin(a) * rr * (kind === 'scar' ? 1.65 : 0.85))
+          .addScaledVector(radial, lift);
+        const nn = kind === 'knot'
+          ? radial.clone().multiplyScalar(0.75).addScaledVector(side, Math.cos(a) * 0.25).normalize()
+          : radial.clone();
+        ring.push(g.vertex(
+          p.x, p.y, p.z, nn.x, nn.y, nn.z,
+          k / SEGS, s, (rng.float() - 0.5) * 0.25, 0.02, rng.float() * Math.PI * 2,
+          kind === 'scar' ? 0.22 : 0.62,
+        ));
+      }
+      rings.push(ring);
+    }
+    for (let ri = 0; ri < RINGS; ri++) {
+      const a = rings[ri] as number[];
+      const b2 = rings[ri + 1] as number[];
+      for (let k = 0; k < SEGS; k++) g.quad(a[k] as number, a[k + 1] as number, b2[k + 1] as number, b2[k] as number);
+    }
+  };
+
+  for (let i = 0; i < profile.knots; i++) {
+    const t = 0.08 + rng.float() * 0.7;
+    const at = pointOnBranch(trunk, t);
+    disc('knot', t, rng.float() * Math.PI * 2, at.radius * (0.22 + rng.float() * 0.22));
+  }
+  for (let i = 0; i < profile.scars; i++) {
+    const t = 0.06 + rng.float() * 0.48;
+    const at = pointOnBranch(trunk, t);
+    disc('scar', t, rng.float() * Math.PI * 2, at.radius * (0.18 + rng.float() * 0.16));
+  }
+
+  // Peeling strips are lifted, tapered ribbons following the trunk tangent.
+  for (let i = 0; i < profile.peelStrips; i++) {
+    const t = 0.04 + rng.float() * 0.55;
+    const at = pointOnBranch(trunk, t);
+    const angle = rng.float() * Math.PI * 2;
+    const ref = Math.abs(at.tangent.y) < 0.94 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0);
+    const n = new Vector3().crossVectors(ref, at.tangent).normalize();
+    const b = new Vector3().crossVectors(at.tangent, n).normalize();
+    const radial = n.multiplyScalar(Math.cos(angle)).addScaledVector(b, Math.sin(angle)).normalize();
+    const side = new Vector3().crossVectors(at.tangent, radial).normalize();
+    const length = at.radius * (0.8 + rng.float() * 1.8);
+    const width = at.radius * (0.05 + rng.float() * 0.08);
+    const rows: number[][] = [];
+    for (let j = 0; j <= 4; j++) {
+      const s = j / 4;
+      const lift = Math.sin(s * Math.PI) * width * 0.55 + 0.004;
+      const center = at.p.clone().addScaledVector(at.tangent, (s - 0.5) * length).addScaledVector(radial, at.radius * 1.08 + lift);
+      rows.push([-1, 1].map((sideK, k) => {
+        const p = center.clone().addScaledVector(side, sideK * width * (1 - s * 0.42));
+        return g.vertex(p.x, p.y, p.z, radial.x, radial.y, radial.z, k, s, 0.08, 0.02, angle, 0.48);
+      }));
+    }
+    for (let j = 0; j < 4; j++) {
+      const a = rows[j] as number[];
+      const b2 = rows[j + 1] as number[];
+      g.quad(a[0] as number, b2[0] as number, b2[1] as number, a[1] as number);
+    }
+  }
+}
+
+/** Append a radial set of curved, surface-resolved roots around the trunk. */
+export function heroRoots(
+  g: MeshGrower,
+  skel: Skeleton,
+  rng: Rng,
+  roots: HeroRootProfile,
+  surface: HeroBarkGeometryProfile,
+  uRepeats: number,
+): void {
+  const trunk = skel.branches.find((b) => b.level === 0);
+  if (!trunk || roots.count <= 0) return;
+  const origin = (trunk.pts[0] as Vector3).clone();
+  const baseR = trunk.radii[0] as number;
+  for (let i = 0; i < roots.count; i++) {
+    const a = (i / roots.count) * Math.PI * 2 + (rng.float() - 0.5) * 0.35;
+    const dir = new Vector3(Math.cos(a), 0, Math.sin(a));
+    const side = new Vector3(-dir.z, 0, dir.x);
+    const len = roots.length[0] + rng.float() * (roots.length[1] - roots.length[0]);
+    const pts: Vector3[] = [];
+    const radii: number[] = [];
+    const dirs: Vector3[] = [];
+    const N = 6;
+    for (let j = 0; j < N; j++) {
+      const t = j / (N - 1);
+      pts.push(origin.clone()
+        .addScaledVector(dir, len * t)
+        .addScaledVector(side, Math.sin(t * Math.PI * 1.4 + a) * len * 0.08 * t)
+        .add(new Vector3(0, roots.rise * (1 - t) - t * t * 0.16, 0)));
+      radii.push(Math.max(0.018, baseR * roots.radiusScale * Math.pow(1 - t, 1.35)));
+    }
+    for (let j = 0; j < N; j++) {
+      const j0 = Math.max(0, j - 1);
+      const j1 = Math.min(N - 1, j + 1);
+      dirs.push(new Vector3().subVectors(pts[j1] as Vector3, pts[j0] as Vector3).normalize());
+    }
+    const br: SkelBranch = { level: 0, pts, radii, dirs, len, tParent: 0, broken: false };
+    tubeForBranch(g, br, {
+      ringSegs: 14,
+      uRepeats,
+      vScale: 1,
+      swayPhase: rng.float() * Math.PI * 2,
+      swayFlexBase: 0,
+      swayFlexTip: 0,
+      hue: rng.float() * 0.3 - 0.15,
+      surface: { ...surface, ellipticity: surface.ellipticity * 0.4, twist: 0 },
+    }, rng);
   }
 }

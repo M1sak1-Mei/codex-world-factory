@@ -11,12 +11,14 @@ import { Color, DoubleSide, type DirectionalLight, type Texture, Vector3 } from 
 import { MeshPhysicalNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu';
 import {
   attribute,
+  bumpMap,
   cameraPosition,
   clamp,
   float,
   mix,
   normalMap,
   normalWorld,
+  parallaxUV,
   positionWorld,
   smoothstep,
   texture,
@@ -28,6 +30,7 @@ import { fbm3, valueNoise3 } from '../gpu/noise/NoiseTSL';
 import type { NF, NV3, NV4 } from '../gpu/TSLTypes';
 import { applyCaustics } from './Caustics';
 import { runiform } from '../gpu/RenderUniform';
+import type { BarkPbrProfile, LeafPbrProfile } from '../vegetation/VegetationProfiles';
 
 /**
  * Shared sun uniforms for the foliage translucency term (D-2). Updated by
@@ -103,17 +106,47 @@ export function barkMaterial(p: BarkMatParams): MeshStandardNodeMaterial {
 export function barkTexturedMaterial(tex: {
   texA: Texture;
   texB: Texture;
-}): MeshStandardNodeMaterial {
+}, profile?: BarkPbrProfile): MeshStandardNodeMaterial {
   const mat = new MeshPhysicalNodeMaterial();
-  mat.specularIntensity = 0.45;
+  const p = profile ?? {
+    parallaxScale: 0,
+    parallaxSteps: 0,
+    cavityStrength: 0.1,
+    normalScale: 1,
+    roughnessBias: 0,
+    specularIntensity: 0.45,
+    clearcoat: 0,
+    clearcoatRoughness: 0.9,
+  };
+  mat.specularIntensity = p.specularIntensity;
+  mat.clearcoat = p.clearcoat;
+  mat.clearcoatRoughness = p.clearcoatRoughness;
   const d = vdata();
-  const a = texture(tex.texA, uv() as never) as unknown as NV4;
-  const b = texture(tex.texB, uv() as never) as unknown as NV4;
+  const baseUv = uv();
+  const height0 = texture(tex.texB, baseUv as never).w;
+  // Fixed-point relief refinement. Five taps remain limited to hero trees;
+  // near trees use three, while mid/far tiers skip the branch entirely.
+  let reliefUv = p.parallaxScale > 0
+    ? parallaxUV(baseUv, height0.sub(0.5).mul(p.parallaxScale))
+    : baseUv;
+  for (let step = 1; step < p.parallaxSteps; step++) {
+    const heightStep = texture(tex.texB, reliefUv as never).w;
+    reliefUv = parallaxUV(baseUv, heightStep.sub(0.5).mul(p.parallaxScale));
+  }
+  const a = texture(tex.texA, reliefUv as never) as unknown as NV4;
+  const b = texture(tex.texB, reliefUv as never) as unknown as NV4;
   const albedo = a.rgb.mul(a.rgb); // sqrt-encoded at bake
-  mat.colorNode = hueShift(albedo, d.x, 0.14).mul(d.w.mul(0.45).add(0.55));
-  mat.normalNode = normalMap(vec3(b.x, b.y, 1));
-  mat.aoNode = a.w;
-  mat.roughnessNode = b.z;
+  // AO only affects indirect light, so height-derived crevice shading also
+  // modulates the base colour. This makes fissures readable under direct sun
+  // without painting a fake directional shadow into the texture.
+  const plateHeight = smoothstep(0.12, 0.7, b.w);
+  const creviceShade = mix(float(1 - p.cavityStrength), float(1), plateHeight);
+  mat.colorNode = hueShift(albedo, d.x, 0.14)
+    .mul(d.w.mul(0.45).add(0.55))
+    .mul(creviceShade);
+  mat.normalNode = normalMap(vec3(b.x, b.y, 1), float(p.normalScale));
+  mat.aoNode = a.w.mul(mix(float(1 - p.cavityStrength * 0.35), float(1), plateHeight));
+  mat.roughnessNode = b.z.add(p.roughnessBias).clamp(0.28, 1);
   mat.metalness = 0;
   // tubes are closed — DoubleSide costs ~nothing and guarantees a trunk can
   // never read hollow regardless of LOD/dither state ("inside-out" report)
@@ -262,12 +295,25 @@ export interface FoliageMatParams {
   color: { r: number; g: number; b: number; hueVar: number };
 }
 
-export function foliageMaterial(p: FoliageMatParams): MeshStandardNodeMaterial {
+export function foliageMaterial(
+  p: FoliageMatParams,
+  surface?: LeafPbrProfile,
+): MeshStandardNodeMaterial {
   // Physical variant for specularIntensity: white dielectric F0 0.04 at
   // glancing sun desaturates sunlit leaves to SILVER (user) — real leaves
   // read color-first; translucency + diffuse carry the lit look
   const mat = new MeshPhysicalNodeMaterial();
-  mat.specularIntensity = 0.3;
+  const pbr = surface ?? {
+    roughness: 0.8,
+    specularIntensity: 0.3,
+    clearcoat: 0,
+    clearcoatRoughness: 0.75,
+    transmission: 0.032,
+    veinNormal: 0,
+  };
+  mat.specularIntensity = pbr.specularIntensity;
+  mat.clearcoat = pbr.clearcoat;
+  mat.clearcoatRoughness = pbr.clearcoatRoughness;
   const d = vdata();
   const base = vec3(p.color.r, p.color.g, p.color.b);
   const tinted = hueShift(base, d.x, p.color.hueVar).mul(d.w.mul(0.8).add(0.2));
@@ -276,9 +322,26 @@ export function foliageMaterial(p: FoliageMatParams): MeshStandardNodeMaterial {
     tinted as unknown as Parameters<typeof varying>[0],
   ) as unknown as typeof mat.colorNode;
   mat.emissiveNode = varying(
-    translucency(tinted as unknown as NV3, 0.032) as unknown as Parameters<typeof varying>[0],
+    translucency(tinted as unknown as NV3, pbr.transmission) as unknown as Parameters<typeof varying>[0],
   ) as unknown as typeof mat.emissiveNode;
-  mat.roughness = 0.8; // real leaves keep a little sheen, far less than default
+  if (pbr.veinNormal > 0) {
+    const luv = uv();
+    const side = luv.x.sub(0.5).abs();
+    const bladeMask = smoothstep(0.5, 0.42, side).mul(smoothstep(0.02, 0.11, side));
+    const midrib = smoothstep(0.07, 0.008, side).mul(smoothstep(0.02, 0.1, luv.y));
+    const primaryVeins = float(1).sub(
+      luv.y.mul(43).add(side.mul(22)).sin().abs(),
+    ).pow(7).mul(bladeMask).mul(0.52);
+    const secondaryVeins = float(1).sub(
+      luv.y.mul(91).sub(side.mul(37)).sin().abs(),
+    ).pow(11).mul(bladeMask).mul(0.15);
+    const cellularRipple = luv.x.mul(71).add(luv.y.mul(83)).sin().mul(0.025);
+    mat.normalNode = bumpMap(
+      midrib.mul(1.25).add(primaryVeins).add(secondaryVeins).add(cellularRipple),
+      float(pbr.veinNormal),
+    );
+  }
+  mat.roughness = pbr.roughness;
   mat.metalness = 0;
   mat.side = DoubleSide;
   return mat;
@@ -288,11 +351,15 @@ export function foliageMaterial(p: FoliageMatParams): MeshStandardNodeMaterial {
 export function foliageCardMaterial(
   atlas: Texture,
   p: FoliageMatParams,
+  surface?: LeafPbrProfile,
 ): MeshStandardNodeMaterial {
   // see foliageMaterial: cards are worse — ONE flat normal per card means
   // the sheen paints whole cards silver coherently. Near-diffuse.
   const mat = new MeshPhysicalNodeMaterial();
-  mat.specularIntensity = 0.18;
+  const pbr = surface;
+  mat.specularIntensity = Math.min(0.22, pbr?.specularIntensity ?? 0.18);
+  mat.clearcoat = Math.min(0.018, pbr?.clearcoat ?? 0);
+  mat.clearcoatRoughness = pbr?.clearcoatRoughness ?? 0.8;
   const d = vdata();
   const t = texture(atlas, uv() as never) as unknown as NV4;
   const albedo = t.rgb.mul(t.rgb); // sqrt-encoded at capture
@@ -308,7 +375,7 @@ export function foliageCardMaterial(
   mat.colorNode = albedo.mul(tintF);
   mat.emissiveNode = albedo.mul(
     varying(
-      translucency(tintF, 0.06) as unknown as Parameters<typeof varying>[0],
+      translucency(tintF, Math.max(0.045, pbr?.transmission ?? 0.06)) as unknown as Parameters<typeof varying>[0],
     ) as unknown as NV3,
   );
   // edge-on fade: a card whose plane is parallel to the view ray shows as a

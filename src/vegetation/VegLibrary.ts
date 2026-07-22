@@ -40,6 +40,11 @@ import {
   type FlowerKind,
 } from './Understory';
 import type { GrowthInstance, SpeciesParams } from './VegTypes';
+import {
+  barkProfileForTier,
+  vegetationSurfaceProfile,
+  type VegetationRenderTier,
+} from './VegetationProfiles';
 
 export interface PoolPart {
   geo: BufferGeometry;
@@ -78,7 +83,7 @@ export const HERO_DIETS: Record<string, HeroDiet> = {
   birch: { meshAnchorTarget: 4000, barkK: 1 },
   karst: { meshAnchorTarget: 4000, barkK: 1.1 },
   snag: { barkK: 1.3 },
-  oak: { meshAnchorTarget: 2200, barkK: 0.55 },
+  oak: { meshAnchorTarget: 320, barkK: 0.55 },
   willow: { meshAnchorTarget: 3200, barkK: 0.9 },
 };
 
@@ -160,12 +165,20 @@ export async function buildVegLibrary(
 
   // ---- trees: 6 species × 4 variants × (R1 cards, R2 branch-cards) ----------
   progress(0.3, 'veg: growing tree variant pools');
-  const treeParts = (sp: SpeciesParams, t: ReturnType<typeof buildTree>): PoolPart[] => {
+  const treeParts = (
+    sp: SpeciesParams,
+    t: ReturnType<typeof buildTree>,
+    tier: VegetationRenderTier,
+  ): PoolPart[] => {
+    const surface = vegetationSurfaceProfile(sp.id);
     const parts: PoolPart[] = [
       {
         geo: t.bark,
         tris: t.bark.index ? t.bark.index.count / 3 : 0,
-        make: () => barkTexturedMaterial(barkOf(sp.barkLayer)),
+        make: () => barkTexturedMaterial(
+          barkOf(sp.barkLayer),
+          barkProfileForTier(surface, tier),
+        ),
         castShadow: true,
       },
     ];
@@ -174,7 +187,11 @@ export async function buildVegLibrary(
       parts.push({
         geo: t.foliage,
         tris: t.foliage.index ? t.foliage.index.count / 3 : 0,
-        make: () => foliageCardMaterial(atlas, { color: sp.foliageColor }),
+        make: () => foliageCardMaterial(
+          atlas,
+          { color: sp.foliageColor },
+          surface.leaf,
+        ),
         castShadow: true,
       });
     }
@@ -197,19 +214,20 @@ export async function buildVegLibrary(
       });
       const t1 = buildTree(sp, seed.rng(label), { lod: 1, inst });
       const t2 = buildTree(sp, seed.rng(label), { lod: 2, inst });
-      const r0 = treeParts(sp, t0);
+      const surface = vegetationSurfaceProfile(sp.id);
+      const r0 = treeParts(sp, t0, 'hero');
       if (t0.foliageMesh) {
         r0.push({
           geo: t0.foliageMesh,
           tris: t0.foliageMesh.index ? t0.foliageMesh.index.count / 3 : 0,
-          make: () => foliageMaterial({ color: sp.foliageColor }),
+          make: () => foliageMaterial({ color: sp.foliageColor }, surface.leaf),
           // cards already cast equivalent crown coverage — mesh-leaf shadow
           // casting would double the caster load for no visible gain
           castShadow: false,
         });
       }
-      const r1 = treeParts(sp, t1);
-      const r2 = treeParts(sp, t2);
+      const r1 = treeParts(sp, t1, 'near');
+      const r2 = treeParts(sp, t2, 'mid');
       const b = bounds(r1.map((p) => p.geo));
       trackCls(ci, b.height, b.radius);
       pools.push({

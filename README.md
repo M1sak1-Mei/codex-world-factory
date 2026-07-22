@@ -21,7 +21,7 @@ three.js `WebGPURenderer`、TSL 和原生 WGSL compute 为基础，通过可复�
 ![Procedural wilderness](docs/readme-wilderness.png)
 
 ```text
-http://localhost:5173/?world=wilderness&terrain=laas&seed=42&preset=low
+http://127.0.0.1:5173/?world=wilderness&terrain=laas&seed=42&preset=low
 ```
 
 ### 魔法森林遗迹 `magic-forest-ruins`
@@ -32,7 +32,7 @@ http://localhost:5173/?world=wilderness&terrain=laas&seed=42&preset=low
 ![Magic forest ruins](docs/readme-magic-forest-ruins.jpg)
 
 ```text
-http://localhost:5173/?world=magic-forest-ruins&terrain=laas&seed=42&preset=low
+http://127.0.0.1:5173/?world=magic-forest-ruins&terrain=laas&seed=42&preset=low
 ```
 
 一次验证样例（`seed=42`、`terrain=laas`）生成 3 个遗迹点、847 块程序化
@@ -45,7 +45,7 @@ http://localhost:5173/?world=magic-forest-ruins&terrain=laas&seed=42&preset=low
 植被清除区、城市入口、出生点、建筑碰撞边界、LOD 与运行时统计。
 
 ```text
-http://localhost:5173/?world=fantasy-city&terrain=laas&seed=84&preset=low
+http://127.0.0.1:5173/?world=fantasy-city&terrain=laas&seed=84&preset=low
 ```
 
 默认 `fantasy-quarter` 配方以一个 3×3 街区骨架为目标：中心 1 栋公会大厅，
@@ -239,23 +239,23 @@ npm run dev
 打开：
 
 ```text
-http://localhost:5173
+http://127.0.0.1:5173
 ```
 
 常用示例：
 
 ```text
 # 原始荒野
-http://localhost:5173/?world=wilderness&terrain=laas&seed=42&preset=low
+http://127.0.0.1:5173/?world=wilderness&terrain=laas&seed=42&preset=low
 
 # 魔法森林遗迹
-http://localhost:5173/?world=magic-forest-ruins&terrain=laas&seed=42&preset=low
+http://127.0.0.1:5173/?world=magic-forest-ruins&terrain=laas&seed=42&preset=low
 
 # 折叠山脉上的魔法遗迹
-http://localhost:5173/?world=magic-forest-ruins&terrain=folded-ranges&seed=7&preset=low
+http://127.0.0.1:5173/?world=magic-forest-ruins&terrain=folded-ranges&seed=7&preset=low
 
 # 程序化奇幻城市
-http://localhost:5173/?world=fantasy-city&terrain=laas&seed=84&preset=low
+http://127.0.0.1:5173/?world=fantasy-city&terrain=laas&seed=84&preset=low
 ```
 
 ### URL 参数
@@ -561,22 +561,22 @@ World = Seed × TerrainRecipe × LandscapeProfile × WorldRecipe
 
 ```text
 # 丰富的默认森林：丘陵、平原、盆地、花草和少量铺装
-http://localhost:5173/?terrain=laas&landscape=balanced&seed=42&preset=low
+http://127.0.0.1:5173/?terrain=laas&landscape=balanced&seed=42&preset=low
 
 # 无固定中央山体的滚动低地案例：丘陵、平原、森林、草甸和花，明确禁用高山
-http://localhost:5173/?terrain=rolling-lowlands&landscape=balanced&include=hills,plains,forest,meadow,grass,flowers&exclude=mountains,desert,snow,cobble,concrete&seed=137&preset=low&alt=220&x=-700&z=700&yaw=-0.785&pitch=-0.28
+http://127.0.0.1:5173/?terrain=rolling-lowlands&landscape=balanced&include=hills,plains,forest,meadow,grass,flowers&exclude=mountains,desert,snow,cobble,concrete&seed=137&preset=low&alt=220&x=-700&z=700&yaw=-0.785&pitch=-0.28
 
 # 大规模铺装路网：石质主轴、混凝土横轴、环路、放射支路和广场
-http://localhost:5173/?terrain=rolling-lowlands&landscape=paved&exclude=desert,snow&seed=84&preset=low&alt=320&x=0&z=0&yaw=-0.78&pitch=-1.05&freeze=1
+http://127.0.0.1:5173/?terrain=rolling-lowlands&landscape=paved&exclude=desert,snow&seed=84&preset=low&alt=320&x=0&z=0&yaw=-0.78&pitch=-1.05&freeze=1
 
 # 沙漠台地，不生成森林、雪地、花和人工地坪
-http://localhost:5173/?terrain=desert-mesas&landscape=arid&include=desert&exclude=forest,snow,flowers,cobble,concrete&seed=17&preset=low
+http://127.0.0.1:5173/?terrain=desert-mesas&landscape=arid&include=desert&exclude=forest,snow,flowers,cobble,concrete&seed=17&preset=low
 
 # 冰川雪原和高山
-http://localhost:5173/?terrain=glacial-uplands&landscape=alpine&include=mountains,snow&exclude=desert,concrete&seed=9&preset=low
+http://127.0.0.1:5173/?terrain=glacial-uplands&landscape=alpine&include=mountains,snow&exclude=desert,concrete&seed=9&preset=low
 
 # 完全复现升级前的自然地形参数
-http://localhost:5173/?terrain=laas&landscape=legacy&seed=42&preset=low
+http://127.0.0.1:5173/?terrain=laas&landscape=legacy&seed=42&preset=low
 ```
 
 ### 景观预设
@@ -632,6 +632,38 @@ http://localhost:5173/?terrain=laas&landscape=legacy&seed=42&preset=low
 调试地表分类时可使用 `?view=sand`、`?view=cobble`、`?view=concrete` 和
 `?view=artificial`。景观配方测试命令为 `npm run test:landscape`，完整回归仍使用
 `npm run test:world` 和 `npm run build`。
+
+## 分级植被表面系统
+
+植被现在把生长骨架、几何表面和 PBR 配方拆成三个独立层。树种仍由 `Skeleton.ts`
+决定枝干和树冠，`TreeBuilder.ts` 根据距离层选择表面实现，`VegMaterials.ts` 消费统一的
+颜色、法线、粗糙度、AO、高度和叶片透光参数。增强材质不会改变树木位置或骨架 seed。
+
+当前第一个完整接入的树种是古橡树（`ancient-oak-v2-relief`）：
+
+- Hero（0–28 m）：自适应枝干采样、不规则/椭圆截面、真实树皮轮廓、枝杈反应木、
+  放射状地表根、树瘤、凹陷伤疤和剥落树皮。古橡树使用独立的块状树皮配方，
+  包含深纵裂、断续横裂、强化法线、五步浮雕视差和裂缝遮蔽。
+- Hero 叶片不再复用通用椭圆叶：使用 16 段、五列曲面网格生成六组裂叶，带真实叶窦、
+  左右不对称、厚度、卷曲、杯状边缘、叶片扭转、中脉/侧脉和黄金角叶簇排布。
+- Near（28–150 m）：完整枝干轮廓和树冠卡片，树皮高度通道使用三步浮雕采样。
+- Mid（150–460 m）：简化枝干和树冠卡片，只保留法线、粗糙度与 AO，不再计算视差。
+- Far（460 m 以外）：沿用可重新受光的八面体 impostor 和远景林冠壳。
+
+Hero 每个结构变体最多提交 5 棵；橡树共有 4 个变体，因此昂贵的增强橡树硬上限为
+20 棵。每棵古橡树最多抽取 320 个锚点生成真实裂叶，其余冠层由原有捕获卡片保持覆盖，
+避免叶片曲面升级后出现无上限的三角形增长。其余森林继续使用 GPU scatter、间接绘制、
+视锥/地形遮挡剔除和互补抖动 LOD。
+
+独立对比场景会使用完全相同的 seed 在左右生成旧版与增强版橡树：
+
+```text
+http://127.0.0.1:5173/?scene=veghero&seed=84&preset=low&freeze=1&hud=0
+```
+
+测试使用 `npm run test:vegetation`；它会验证配置层级、20 棵 Hero 上限、骨架不变性、
+古橡树专用树皮层、浮雕分级预算、真实裂叶峰谷、叶片复杂度、新增树根/缺陷几何以及
+顶点数据有效性。
 
 ## 来源与维护
 

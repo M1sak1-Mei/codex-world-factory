@@ -59,7 +59,7 @@ test('far shell cannot render below the interior terrain', () => {
 
 test('batch manifest is a deterministic Cartesian product', () => {
   const options = {
-    baseUrl: 'http://localhost:5173/',
+    baseUrl: 'http://127.0.0.1:5173/',
     recipes: TERRAIN_RECIPE_IDS.slice(0, 2),
     seeds: [7, 8],
     shots: [1, 5],

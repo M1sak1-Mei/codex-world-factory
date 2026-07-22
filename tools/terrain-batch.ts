@@ -190,7 +190,7 @@ function usage(): string {
     '  --include hills,plains,forest,flowers,cobble',
     '  --exclude desert,snow,concrete',
     '  --time 11',
-    '  --base-url http://localhost:5173/',
+    '  --base-url http://127.0.0.1:5173/',
     '  --out generated/terrain-batch.json',
   ].join('\n');
 }
@@ -214,7 +214,7 @@ async function main(): Promise<void> {
     throw new Error(`time must be in 0..24; received ${timeOfDay}`);
   }
   const manifest = buildTerrainBatch({
-    baseUrl: stringFlag(flags, 'base-url', 'http://localhost:5173/'),
+    baseUrl: stringFlag(flags, 'base-url', 'http://127.0.0.1:5173/'),
     recipes,
     seeds,
     shots,

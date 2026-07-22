@@ -87,22 +87,23 @@ import { instanceVeg, updateVegViewPos, type RingFade } from '../render/VegInsta
 import { depthPrepassTwin } from '../render/VegPrepass';
 import type { NF, NI, NU, NV3, NV4 } from '../gpu/TSLTypes';
 import type { VegLib } from './VegLibrary';
+import { VEGETATION_TIER_POLICY } from './VegetationProfiles';
 
 // ring distances (m) + dither bands (user feedback: transitions read too
 // close — full-card trees hold to 150 m, impostors start at 460 m).
 // Hero ring 0 (≤26 m): full bark + cards + REAL mesh leaves — the nanite-
 // equivalence near field (spec floor: hero tree ≥100k tris).
-const R0_FAR = 26;
-const BAND0 = 5;
-const R1_FAR = 150;
-const BAND1 = 14;
-const R2_FAR = 460;
-const BAND2 = 36;
+const R0_FAR = VEGETATION_TIER_POLICY.hero.far;
+const BAND0 = VEGETATION_TIER_POLICY.hero.band;
+const R1_FAR = VEGETATION_TIER_POLICY.near.far;
+const BAND1 = VEGETATION_TIER_POLICY.near.band;
+const R2_FAR = VEGETATION_TIER_POLICY.mid.far;
+const BAND2 = VEGETATION_TIER_POLICY.mid.band;
 const EX_R1_FAR = 120;
 const EX_BAND = 15;
 
 // per-group compact-region capacities
-const CAP_HERO = 48;
+const CAP_HERO = VEGETATION_TIER_POLICY.hero.maxPerVariant;
 const CAP_TREE_R1 = 6144;
 const CAP_TREE_R2 = 8192;
 const CAP_IMPOSTOR = 49152;
