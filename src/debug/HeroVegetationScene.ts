@@ -26,8 +26,9 @@ import {
 } from '../render/VegMaterials';
 import { SunSky } from '../sky/SunSky';
 import { captureFoliageAtlas } from '../vegetation/FoliageCards';
-import { OAK } from '../vegetation/Species';
+import { OAK, TREE_SPECIES } from '../vegetation/Species';
 import { buildTree } from '../vegetation/TreeBuilder';
+import { HERO_DIETS } from '../vegetation/VegLibrary';
 import {
   barkProfileForTier,
   vegetationSurfaceProfile,
@@ -59,7 +60,9 @@ function label(text: string, sub: string): Mesh {
 
 export async function buildHeroVegetationScene(ctx: WorldContext): Promise<void> {
   const { engine, params, seed } = ctx;
-  const surface = vegetationSurfaceProfile(OAK.id);
+  const requestedSpecies = new URLSearchParams(window.location.search).get('species') ?? 'oak';
+  const species = TREE_SPECIES.find((candidate) => candidate.id === requestedSpecies) ?? OAK;
+  const surface = vegetationSurfaceProfile(species.id);
 
   ctx.progress(0.05, 'hero vegetation: lighting');
   const sunSky = new SunSky(engine, params.timeOfDay);
@@ -81,26 +84,35 @@ export async function buildHeroVegetationScene(ctx: WorldContext): Promise<void>
   engine.scene.add(ground);
 
   ctx.progress(0.15, 'hero vegetation: baking oak PBR maps');
-  const atlas = await captureFoliageAtlas(engine.renderer, OAK, seed.rng('cards/oak'));
+  const atlas = species.foliage
+    ? await captureFoliageAtlas(engine.renderer, species, seed.rng(`cards/${species.id}`))
+    : null;
   const bark = await bakeBarkTextures(
     engine.renderer,
-    OAK.barkLayer,
-    seed.sub(`bark/${OAK.barkLayer}`) % 977,
+    species.barkLayer,
+    seed.sub(`bark/${species.barkLayer}`) % 977,
   );
 
+  const separation = Math.max(8, species.height[1] * 0.52);
   const variants = [
-    { x: -9, enhanced: false, title: 'BASELINE OAK' },
-    { x: 9, enhanced: true, title: 'HERO OAK' },
+    { x: -separation, enhanced: false, title: `BASELINE ${species.id.toUpperCase()}` },
+    { x: separation, enhanced: true, title: `HERO ${species.id.toUpperCase()}` },
   ];
   for (let i = 0; i < variants.length; i++) {
     const variant = variants[i];
     if (!variant) continue;
     ctx.progress(0.3 + i * 0.28, `hero vegetation: ${variant.title.toLowerCase()}`);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const built = buildTree(OAK, seed.rng('hero/oak-comparison'), {
+    const built = buildTree(species, seed.rng(`hero/${species.id}-comparison`), {
       foliageMode: 'hybrid',
       heroSurface: variant.enhanced,
-      hero: { cardTarget: 1800, meshAnchorTarget: 320, barkK: 0.8 },
+      hero: {
+        cardTarget: 1800,
+        ...(HERO_DIETS[species.id] ?? {
+          meshAnchorTarget: surface.hero.leaf.meshAnchorTarget,
+          barkK: 0.8,
+        }),
+      },
     });
     const barkMat = variant.enhanced
       ? barkTexturedMaterial(bark, barkProfileForTier(surface, 'hero'))
@@ -111,12 +123,12 @@ export async function buildHeroVegetationScene(ctx: WorldContext): Promise<void>
     trunk.receiveShadow = true;
     engine.scene.add(trunk);
 
-    if (built.foliage) {
+    if (built.foliage && atlas) {
       const cards = new Mesh(
         built.foliage,
         foliageCardMaterial(
           atlas,
-          { color: OAK.foliageColor },
+          { color: species.foliageColor },
           variant.enhanced ? surface.leaf : undefined,
         ),
       );
@@ -129,7 +141,7 @@ export async function buildHeroVegetationScene(ctx: WorldContext): Promise<void>
       const leaves = new Mesh(
         built.foliageMesh,
         foliageMaterial(
-          { color: OAK.foliageColor },
+          { color: species.foliageColor },
           variant.enhanced ? surface.leaf : undefined,
         ),
       );
@@ -147,7 +159,7 @@ export async function buildHeroVegetationScene(ctx: WorldContext): Promise<void>
     tag.position.set(variant.x, 1.5, 4.4);
     tag.rotation.x = -0.22;
     engine.scene.add(tag);
-    engine.stats.counters[`hero.oak.${variant.enhanced ? 'enhanced' : 'baseline'}`] =
+    engine.stats.counters[`hero.${species.id}.${variant.enhanced ? 'enhanced' : 'baseline'}`] =
       built.stats.tris;
   }
 
@@ -162,8 +174,9 @@ export async function buildHeroVegetationScene(ctx: WorldContext): Promise<void>
   };
 
   if (params.cam === null) {
-    engine.camera.position.set(0, 7.2, 30);
-    engine.camera.lookAt(new Vector3(0, 7.5, 0));
+    const cameraDistance = Math.max(28, species.height[1] * 1.75);
+    engine.camera.position.set(0, species.height[1] * 0.36, cameraDistance);
+    engine.camera.lookAt(new Vector3(0, species.height[1] * 0.4, 0));
   }
   engine.onUpdate(() => {
     if (engine.camera.position.y < 0.55) engine.camera.position.y = 0.55;

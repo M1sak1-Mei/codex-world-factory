@@ -32,6 +32,7 @@ import type { NF, NV2, NV4 } from '../gpu/TSLTypes';
 import { buildLeaf, buildNeedleSpray } from './LeafMesh';
 import { MeshGrower } from './TubeMesh';
 import type { LeafAnchor, SpeciesParams } from './VegTypes';
+import { vegetationSurfaceProfile } from './VegetationProfiles';
 
 export const ATLAS_RES = 1024;
 
@@ -51,6 +52,7 @@ function buildTwigTile(
 ): void {
   const fol = sp.foliage;
   if (!fol) return;
+  const surfaceDetail = vegetationSurfaceProfile(sp.id).hero.leaf;
   const half = 0.46;
   if (fol.kind === 'needleSpray') {
     const brush = fol.leaf.brush > 0.5;
@@ -83,6 +85,7 @@ function buildTwigTile(
         g, _m, leaf, sprayLen * (i < 0 ? 1 : s * 0.8), rng,
         rng.float() * 2 - 1, 0.5, rng.float() * 6.28,
         0.72 + rng.float() * 0.28,
+        surfaceDetail,
       );
     }
   } else {
@@ -107,6 +110,7 @@ function buildTwigTile(
         g, _m, fol.leaf,
         rng.float() * 2 - 1, 0.5, rng.float() * 6.28,
         0.65 + rng.float() * 0.35,
+        surfaceDetail,
       );
     }
   }

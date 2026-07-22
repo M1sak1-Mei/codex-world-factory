@@ -161,12 +161,19 @@ export function barkTexturedMaterial(tex: {
  */
 export function rockMaterial(opts?: {
   moss?: number;
+  /** Near-field procedural bump amplitude. */
+  microRelief?: number;
+  /** Damp stone sheen; deliberately capped below a polished clear coat. */
+  wetness?: number;
   /** base albedo of the lit rock — talus must match the pale cliff that
    *  shed it; the default dark tone is for mossy forest boulders */
   tone?: { r: number; g: number; b: number };
 }): MeshStandardNodeMaterial {
   const mat = new MeshPhysicalNodeMaterial();
-  mat.specularIntensity = 0.4;
+  const wetness = Math.min(0.32, Math.max(0, opts?.wetness ?? 0.06));
+  mat.specularIntensity = 0.34 + wetness * 0.24;
+  mat.clearcoat = wetness * 0.16;
+  mat.clearcoatRoughness = 0.74;
   const d = vdata();
   const wp = positionWorld;
   const strataT = d.y;
@@ -209,6 +216,12 @@ export function rockMaterial(opts?: {
   }
   mat.colorNode = albedo.mul(d.w.mul(0.35).add(0.65));
   mat.aoNode = d.w;
+  const rockGrain = fbm3(wp.mul(7.5), 4).mul(0.5).add(0.5);
+  const mineralPits = smoothstep(0.7, 0.86, valueNoise3(wp.mul(19))).mul(-0.28);
+  mat.normalNode = bumpMap(
+    rockGrain.add(mineralPits),
+    float(opts?.microRelief ?? 0.18),
+  );
   mat.metalness = 0;
   // submerged boulders / streambed cobbles dance with the water caustics
   applyCaustics(mat);
@@ -224,12 +237,29 @@ export function deadwoodMaterial(
   /** albedo multiplier — branches use the pale snag bark and blow out white
    *  at noon without a dry-wood darkening */
   dim?: { r: number; g: number; b: number },
+  profile?: BarkPbrProfile,
 ): MeshStandardNodeMaterial {
   const mat = new MeshPhysicalNodeMaterial();
-  mat.specularIntensity = 0.45;
+  const p = profile ?? {
+    parallaxScale: 0.018, parallaxSteps: 2, cavityStrength: 0.28,
+    normalScale: 1.25, roughnessBias: 0.04, specularIntensity: 0.32,
+    clearcoat: 0, clearcoatRoughness: 0.9,
+  };
+  mat.specularIntensity = p.specularIntensity;
+  mat.clearcoat = p.clearcoat;
+  mat.clearcoatRoughness = p.clearcoatRoughness;
   const d = vdata();
-  const a = texture(tex.texA, uv() as never) as unknown as NV4;
-  const b = texture(tex.texB, uv() as never) as unknown as NV4;
+  const baseUv = uv();
+  const height0 = texture(tex.texB, baseUv as never).w;
+  let reliefUv = p.parallaxScale > 0
+    ? parallaxUV(baseUv, height0.sub(0.5).mul(p.parallaxScale))
+    : baseUv;
+  for (let step = 1; step < p.parallaxSteps; step++) {
+    const heightStep = texture(tex.texB, reliefUv as never).w;
+    reliefUv = parallaxUV(baseUv, heightStep.sub(0.5).mul(p.parallaxScale));
+  }
+  const a = texture(tex.texA, reliefUv as never) as unknown as NV4;
+  const b = texture(tex.texB, reliefUv as never) as unknown as NV4;
   let albedo = a.rgb.mul(a.rgb) as unknown as NV3;
   if (dim) albedo = albedo.mul(vec3(dim.r, dim.g, dim.b)) as unknown as NV3;
   const mossN = smoothstep(0.24, 0.58, fbm3(positionWorld.mul(2.6), 3).mul(0.5).add(0.5));
@@ -237,12 +267,18 @@ export function deadwoodMaterial(
   albedo = mix(albedo, vec3(0.05, 0.1, 0.032), moss) as unknown as NV3;
   // rot darkening for heavily decayed wood
   albedo = albedo.mul(float(1).sub(d.z.mul(0.25))) as unknown as NV3;
-  mat.colorNode = hueShift(albedo, d.x, 0.1);
+  const plateHeight = smoothstep(0.1, 0.68, b.w);
+  const creviceShade = mix(float(1 - p.cavityStrength), float(1), plateHeight);
+  mat.colorNode = hueShift(albedo, d.x, 0.1).mul(creviceShade);
   // logs lying across streams sit in the caustic band
   applyCaustics(mat);
-  mat.normalNode = normalMap(vec3(b.x, b.y, 1));
-  mat.aoNode = a.w;
-  mat.roughnessNode = mix(b.z, float(1), moss);
+  mat.normalNode = normalMap(vec3(b.x, b.y, 1), float(p.normalScale));
+  mat.aoNode = a.w.mul(mix(float(0.8), float(1), plateHeight));
+  mat.roughnessNode = mix(
+    b.z.add(p.roughnessBias).clamp(0.3, 1),
+    float(1),
+    moss,
+  );
   mat.metalness = 0;
   // same crossfade insurance as bark: a dither hole in a FrontSide closed
   // tube shows clean through (interior wall is a back face)
@@ -258,7 +294,10 @@ export function flowerMaterial(petal: {
   g: number;
   b: number;
 }): MeshStandardNodeMaterial {
-  const mat = new MeshStandardNodeMaterial();
+  const mat = new MeshPhysicalNodeMaterial();
+  mat.specularIntensity = 0.34;
+  mat.clearcoat = 0.055;
+  mat.clearcoatRoughness = 0.58;
   const d = vdata();
   const stem = vec3(0.045, 0.1, 0.03);
   const center = vec3(0.5, 0.32, 0.045);
@@ -268,7 +307,13 @@ export function flowerMaterial(petal: {
   let albedo = mix(stem, center, centerK) as unknown as NV3;
   albedo = mix(albedo, petalC, petalK) as unknown as NV3;
   mat.colorNode = albedo.mul(d.w.mul(0.5).add(0.5));
-  mat.roughness = 0.7;
+  mat.emissiveNode = translucency(albedo, 0.035).mul(petalK);
+  const fuv = uv();
+  const petalVeins = float(1).sub(
+    fuv.y.mul(35).add(fuv.x.sub(0.5).abs().mul(18)).sin().abs(),
+  ).pow(8).mul(petalK);
+  mat.normalNode = bumpMap(petalVeins, float(0.16));
+  mat.roughnessNode = mix(float(0.82), float(0.66), petalK);
   mat.metalness = 0;
   mat.side = DoubleSide;
   return mat;
@@ -276,7 +321,10 @@ export function flowerMaterial(petal: {
 
 /** mushroom shading by vdata.x part id: 0 stem, 0.5 gills, 1 cap */
 export function mushroomMaterial(): MeshStandardNodeMaterial {
-  const mat = new MeshStandardNodeMaterial();
+  const mat = new MeshPhysicalNodeMaterial();
+  mat.specularIntensity = 0.32;
+  mat.clearcoat = 0.035;
+  mat.clearcoatRoughness = 0.66;
   const d = vdata();
   const stem = vec3(0.32, 0.29, 0.24);
   const gills = vec3(0.42, 0.37, 0.28);
@@ -286,7 +334,11 @@ export function mushroomMaterial(): MeshStandardNodeMaterial {
   let albedo = mix(stem, gills, gillK) as unknown as NV3;
   albedo = mix(albedo, cap, capK) as unknown as NV3;
   mat.colorNode = albedo.mul(d.w);
-  mat.roughness = 0.62;
+  const muv = uv();
+  const gillRibs = float(1).sub(muv.x.mul(58).sin().abs()).pow(9).mul(gillK);
+  const capPores = fbm3(positionWorld.mul(42), 3).mul(0.5).add(0.5).mul(capK);
+  mat.normalNode = bumpMap(gillRibs.mul(0.65).add(capPores.mul(0.22)), float(0.14));
+  mat.roughnessNode = mix(float(0.76), float(0.58), capK);
   mat.metalness = 0;
   return mat;
 }

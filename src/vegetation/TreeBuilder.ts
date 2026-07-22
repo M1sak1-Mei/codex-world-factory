@@ -145,7 +145,15 @@ export function buildTree(
       const meshAnchors =
         mStride > 1 ? skel.anchors.filter((_, i) => i % mStride === 0) : skel.anchors;
       for (const anchor of meshAnchors) {
-        if (fol.kind === 'needleSpray') buildSprayAt(folG, anchor, heroLeaf, folRng);
+        if (fol.kind === 'needleSpray') {
+          buildSprayAt(
+            folG,
+            anchor,
+            heroLeaf,
+            folRng,
+            heroSurface ? surface.hero.leaf : undefined,
+          );
+        }
         else buildLeafCluster(
           folG,
           anchor,

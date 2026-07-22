@@ -77,14 +77,14 @@ export const HERO_DIETS: Record<string, HeroDiet> = {
   // cards stay UNTHINNED at hero range: thinning enlarges the survivors
   // (sqrt-coverage rule) and a 1.65×-size card 4 m away is a giant flat
   // sheet — full-count original-size cards + mesh leaves is the gallery look
-  spruce: { meshAnchorTarget: 850, barkK: 0.8 },
-  pine: { meshAnchorTarget: 350, barkK: 0.8 },
-  beech: { meshAnchorTarget: 2200, barkK: 0.5 },
-  birch: { meshAnchorTarget: 4000, barkK: 1 },
-  karst: { meshAnchorTarget: 4000, barkK: 1.1 },
+  spruce: { meshAnchorTarget: 220, barkK: 0.8 },
+  pine: { meshAnchorTarget: 120, barkK: 0.8 },
+  beech: { meshAnchorTarget: 260, barkK: 0.5 },
+  birch: { meshAnchorTarget: 300, barkK: 1 },
+  karst: { meshAnchorTarget: 220, barkK: 1.1 },
   snag: { barkK: 1.3 },
   oak: { meshAnchorTarget: 320, barkK: 0.55 },
-  willow: { meshAnchorTarget: 3200, barkK: 0.9 },
+  willow: { meshAnchorTarget: 280, barkK: 0.9 },
 };
 
 export interface VegLib {
@@ -284,11 +284,15 @@ export async function buildVegLibrary(
       const rng = seed.rng(`veg/${sp.id}/${v}`);
       const shrub = buildShrub(sp, rng);
       const atlas = atlases.get(sp.id);
+      const surface = vegetationSurfaceProfile(sp.id);
       const parts: PoolPart[] = [
         {
           geo: shrub.bark,
           tris: shrub.bark.index ? shrub.bark.index.count / 3 : 0,
-          make: () => barkTexturedMaterial(barkOf(2)),
+          make: () => barkTexturedMaterial(
+            barkOf(sp.barkLayer),
+            barkProfileForTier(surface, 'near'),
+          ),
           castShadow: true,
         },
       ];
@@ -296,7 +300,7 @@ export async function buildVegLibrary(
         parts.push({
           geo: shrub.foliage,
           tris: shrub.foliage.index ? shrub.foliage.index.count / 3 : 0,
-          make: () => foliageCardMaterial(atlas, { color: sp.foliageColor }),
+          make: () => foliageCardMaterial(atlas, { color: sp.foliageColor }, surface.leaf),
           castShadow: true,
         });
       }
@@ -317,6 +321,7 @@ export async function buildVegLibrary(
   }
   // ferns
   const fernAtlas = atlases.get('fern');
+  const fernSurface = vegetationSurfaceProfile('fern');
   for (let v = 0; v < 4; v++) {
     const geo = buildFern(seed.rng(`veg/fern/${v}`));
     const tris = geo.index ? geo.index.count / 3 : 0;
@@ -331,7 +336,11 @@ export async function buildVegLibrary(
               geo,
               tris,
               make: () =>
-                foliageCardMaterial(fernAtlas, { color: FERN_CAPTURE.foliageColor }),
+                foliageCardMaterial(
+                  fernAtlas,
+                  { color: FERN_CAPTURE.foliageColor },
+                  fernSurface.leaf,
+                ),
               castShadow: false,
             },
           ]
@@ -380,6 +389,8 @@ export async function buildVegLibrary(
   // ---- extras: deadfall + boulders/slabs -------------------------------------
   progress(0.86, 'veg: deadfall + boulder pools');
   const deadTex = barkOf(5);
+  const deadProfile = barkProfileForTier(vegetationSurfaceProfile('snag'), 'near');
+  const deadFarProfile = barkProfileForTier(vegetationSurfaceProfile('snag'), 'mid');
   // weathered-wood darkening: the snag bark bake is pale gray and logs read
   // as glowing white slivers in noon sun without it
   const logDim = { r: 0.6, g: 0.52, b: 0.44 };
@@ -395,7 +406,7 @@ export async function buildVegLibrary(
         {
           geo: log.geometry,
           tris: log.tris,
-          make: () => deadwoodMaterial(deadTex, logDim),
+          make: () => deadwoodMaterial(deadTex, logDim, deadProfile),
           castShadow: true,
         },
       ],
@@ -418,7 +429,7 @@ export async function buildVegLibrary(
         {
           geo: stump.geometry,
           tris: stump.tris,
-          make: () => deadwoodMaterial(deadTex, logDim),
+          make: () => deadwoodMaterial(deadTex, logDim, deadProfile),
           castShadow: true,
         },
       ],
@@ -550,7 +561,7 @@ export async function buildVegLibrary(
         {
           geo,
           tris,
-          make: () => deadwoodMaterial(deadTex, branchDim),
+          make: () => deadwoodMaterial(deadTex, branchDim, deadProfile),
           castShadow: false,
         },
       ],
@@ -560,7 +571,7 @@ export async function buildVegLibrary(
         {
           geo: geo.clone(),
           tris,
-          make: () => deadwoodMaterial(deadTex, branchDim),
+          make: () => deadwoodMaterial(deadTex, branchDim, deadFarProfile),
           castShadow: false,
         },
       ],

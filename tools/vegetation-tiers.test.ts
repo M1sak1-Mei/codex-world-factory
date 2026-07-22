@@ -3,8 +3,8 @@ import { test } from 'node:test';
 import { Matrix4, type BufferAttribute } from 'three';
 import { WorldSeed } from '../src/core/Seed';
 import { BARK_TABLE } from '../src/gpu/passes/BarkSynth';
-import { buildLeaf } from '../src/vegetation/LeafMesh';
-import { OAK } from '../src/vegetation/Species';
+import { buildLeaf, buildNeedleSpray } from '../src/vegetation/LeafMesh';
+import { OAK, SPRUCE, TREE_SPECIES } from '../src/vegetation/Species';
 import { buildTree } from '../src/vegetation/TreeBuilder';
 import { MeshGrower } from '../src/vegetation/TubeMesh';
 import type { SpeciesParams } from '../src/vegetation/VegTypes';
@@ -37,7 +37,7 @@ function branchPoints(tree: ReturnType<typeof buildTree>): number[][][] {
 
 test('ancient oak selects a complete PBR and geometry profile', () => {
   assert.equal(vegetationSurfaceProfile('oak'), ANCIENT_OAK_SURFACE);
-  assert.equal(vegetationSurfaceProfile('spruce').hero.enabled, false);
+  assert.equal(vegetationSurfaceProfile('spruce').hero.enabled, true);
   assert.ok(ANCIENT_OAK_SURFACE.bark.parallaxScale > 0);
   assert.ok(ANCIENT_OAK_SURFACE.bark.parallaxSteps >= 4);
   assert.ok(ANCIENT_OAK_SURFACE.bark.cavityStrength >= 0.35);
@@ -100,6 +100,78 @@ test('vegetation bands are ordered and cap costly oak heroes at twenty', () => {
   assert.ok(VEGETATION_TIER_POLICY.hero.far < VEGETATION_TIER_POLICY.near.far);
   assert.ok(VEGETATION_TIER_POLICY.near.far < VEGETATION_TIER_POLICY.mid.far);
   assert.equal(VEGETATION_TIER_POLICY.hero.maxPerVariant * 4, 20);
+});
+
+test('every tree species owns a complete realistic surface contract', () => {
+  assert.equal(new Set(TREE_SPECIES.map((species) => species.barkLayer)).size, TREE_SPECIES.length);
+  assert.ok(BARK_TABLE.length >= TREE_SPECIES.length);
+  const profileIds = new Set<string>();
+  for (const species of TREE_SPECIES) {
+    const profile = vegetationSurfaceProfile(species.id);
+    assert.ok(profile.hero.enabled, `${species.id} must opt into hero realization`);
+    assert.ok(profile.bark.parallaxSteps >= 3, `${species.id} needs near relief sampling`);
+    assert.ok(profile.bark.normalScale > 0.8, `${species.id} needs a readable normal response`);
+    assert.ok(profile.hero.roots.count >= 5, `${species.id} needs a rooted trunk transition`);
+    assert.ok(profile.hero.bark.ridgeCount >= 5, `${species.id} needs silhouette breakup`);
+    assert.ok(!profileIds.has(profile.id), `${species.id} surface id must be unique`);
+    profileIds.add(profile.id);
+    if (species.foliage?.kind === 'leafCluster') {
+      assert.ok(profile.hero.leaf.columns >= 5);
+      assert.ok(profile.hero.leaf.rows >= 10);
+      assert.ok(profile.leaf.veinNormal >= 0.2);
+    } else if (species.foliage?.kind === 'needleSpray') {
+      assert.ok(profile.hero.leaf.needleSegments >= 2);
+      assert.ok(profile.hero.leaf.needleCrossPlanes >= 2);
+    }
+  }
+});
+
+test('enhanced surface preserves every species skeleton and enriches its bark', () => {
+  const seed = new WorldSeed(8419);
+  for (const species of TREE_SPECIES) {
+    const compact: SpeciesParams = {
+      ...species,
+      height: [6, 6],
+      levels: species.levels.map((level, i) => ({
+        ...level,
+        density: i === 0 ? 0 : level.density * 0.08,
+      })),
+    };
+    const options = { foliageMode: 'cards' as const, hero: { barkK: 0.55 } };
+    const baseline = buildTree(compact, seed.rng(`all/${species.id}`), {
+      ...options,
+      heroSurface: false,
+    });
+    const enhanced = buildTree(compact, seed.rng(`all/${species.id}`), {
+      ...options,
+      heroSurface: true,
+    });
+    assert.deepEqual(branchPoints(enhanced), branchPoints(baseline), species.id);
+    assert.equal(enhanced.stats.anchors, baseline.stats.anchors, species.id);
+    assert.ok(
+      (enhanced.bark.index?.count ?? 0) > (baseline.bark.index?.count ?? 0),
+      `${species.id} enhanced bark should add resolved surface geometry`,
+    );
+  }
+});
+
+test('hero conifer needles use curved crossed ribbons', () => {
+  const grower = new MeshGrower();
+  const shape = { ...SPRUCE.foliage!.leaf, needleCount: 4 };
+  buildNeedleSpray(
+    grower,
+    new Matrix4(),
+    shape,
+    0.3,
+    new WorldSeed(84).rng('needle/unit'),
+    0,
+    0.6,
+    1.2,
+    1,
+    vegetationSurfaceProfile('spruce').hero.leaf,
+  );
+  // 8 stem triangles + 4 needles × 2 segments × 2 planes × 2 triangles.
+  assert.equal(grower.triCount, 40);
 });
 
 test('hero surface preserves the seeded skeleton while enriching geometry', () => {

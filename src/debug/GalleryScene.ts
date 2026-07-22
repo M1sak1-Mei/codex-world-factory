@@ -219,6 +219,7 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
       await new Promise((r) => setTimeout(r, 0));
       const rng = seed.rng(`tree/${sp.id}/${vi}`);
       const built = buildTree(sp, rng);
+      const surface = vegetationSurfaceProfile(sp.id);
       totalTris += built.stats.tris;
       const at = exhibit(
         x,
@@ -227,7 +228,10 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
         `seed ${vi} · ${(built.stats.tris / 1000).toFixed(0)}k tris · ${built.stats.height.toFixed(1)} m`,
       );
       const barkTex = barks.get(sp.barkLayer) as BarkTextures;
-      const barkMesh = new Mesh(built.bark, barkTexturedMaterial(barkTex));
+      const barkMesh = new Mesh(
+        built.bark,
+        barkTexturedMaterial(barkTex, barkProfileForTier(surface, 'hero')),
+      );
       barkMesh.position.set(at.x, 0.42, at.z);
       barkMesh.castShadow = true;
       barkMesh.receiveShadow = true;
@@ -236,7 +240,7 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
       if (built.foliage && atlas) {
         const folMesh = new Mesh(
           built.foliage,
-          foliageCardMaterial(atlas, { color: sp.foliageColor }),
+          foliageCardMaterial(atlas, { color: sp.foliageColor }, surface.leaf),
         );
         folMesh.position.copy(barkMesh.position);
         folMesh.castShadow = true;
@@ -317,7 +321,10 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
     engine.scene.add(m);
     const vineRng = seed.rng('cliff/vines');
     const vines = buildVines(vineRng, 5.2, 4.2, 9);
-    const stemMat = barkTexturedMaterial(barks.get(4) as BarkTextures);
+    const stemMat = barkTexturedMaterial(
+      barks.get(4) as BarkTextures,
+      barkProfileForTier(vegetationSurfaceProfile('karst'), 'near'),
+    );
     const vs = new Mesh(vines.stems, stemMat);
     vs.position.set(71.8, 7.6, RZ + 1.7);
     vs.castShadow = true;
@@ -326,7 +333,11 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
     if (hazelAtlas) {
       const vl = new Mesh(
         vines.leaves,
-        foliageCardMaterial(hazelAtlas, { color: { r: 0.05, g: 0.12, b: 0.035, hueVar: 0.25 } }),
+        foliageCardMaterial(
+          hazelAtlas,
+          { color: { r: 0.05, g: 0.12, b: 0.035, hueVar: 0.25 } },
+          vegetationSurfaceProfile('bushHazel').leaf,
+        ),
       );
       vl.position.copy(vs.position);
       vl.castShadow = true;
@@ -337,7 +348,11 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
       for (let i = 0; i < 2; i++) {
         const lf = new Mesh(
           buildFern(seed.rng(`cliff/fern${i}`)),
-          foliageCardMaterial(fernAtlas2, { color: FERN_CAPTURE.foliageColor }),
+          foliageCardMaterial(
+            fernAtlas2,
+            { color: FERN_CAPTURE.foliageColor },
+            vegetationSurfaceProfile('fern').leaf,
+          ),
         );
         lf.position.set(70.4 + i * 2.2, 1.5 + i * 1.3, RZ + 1.75 - i * 0.35);
         lf.castShadow = true;
@@ -422,7 +437,11 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
       for (let i = 0; i < 3; i++) {
         const fern = new Mesh(
           buildFern(seed.rng(`fern/${i}`)),
-          foliageCardMaterial(fernAtlas, { color: FERN_CAPTURE.foliageColor }),
+          foliageCardMaterial(
+            fernAtlas,
+            { color: FERN_CAPTURE.foliageColor },
+            vegetationSurfaceProfile('fern').leaf,
+          ),
         );
         fern.position.set(-12 + i * 3, 0.02, GZ + (i % 2));
         fern.castShadow = true;
@@ -456,14 +475,24 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
     let sx = 26;
     for (const sp of UNDERSTORY_SPECIES) {
       const shrub = buildShrub(sp, seed.rng(`shrub/${sp.id}`));
-      const bm = new Mesh(shrub.bark, barkTexturedMaterial(barks.get(sp.barkLayer) as BarkTextures));
+      const surface = vegetationSurfaceProfile(sp.id);
+      const bm = new Mesh(
+        shrub.bark,
+        barkTexturedMaterial(
+          barks.get(sp.barkLayer) as BarkTextures,
+          barkProfileForTier(surface, 'near'),
+        ),
+      );
       bm.position.set(sx, 0, GZ);
       bm.castShadow = true;
       bm.receiveShadow = true;
       engine.scene.add(bm);
       const at = atlases.get(sp.id);
       if (shrub.foliage && at) {
-        const fm = new Mesh(shrub.foliage, foliageCardMaterial(at, { color: sp.foliageColor }));
+        const fm = new Mesh(
+          shrub.foliage,
+          foliageCardMaterial(at, { color: sp.foliageColor }, surface.leaf),
+        );
         fm.position.copy(bm.position);
         fm.castShadow = true;
         fm.receiveShadow = true;
@@ -477,11 +506,12 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
   // ---- dead row: logs (3 decay states), stumps --------------------------------
   ctx.progress(0.95, 'gallery: deadfall');
   const DZ = ROW_Z.dead;
-  const spruceBark = barks.get(0) as BarkTextures;
+  const deadBark = barks.get(5) as BarkTextures;
+  const deadProfile = barkProfileForTier(vegetationSurfaceProfile('snag'), 'near');
   const decays: DecayState[] = ['fresh', 'mossy', 'rotten'];
   for (let i = 0; i < decays.length; i++) {
     const log = buildLog(seed.rng(`log/${i}`), decays[i] as DecayState);
-    const m = new Mesh(log.geometry, deadwoodMaterial(spruceBark));
+    const m = new Mesh(log.geometry, deadwoodMaterial(deadBark, undefined, deadProfile));
     m.position.set(-22 + i * 9, 0, DZ);
     // keep logs near-perpendicular to the row so they present their length
     m.rotation.y = (seed.rng(`logr/${i}`).float() - 0.5) * 0.8;
@@ -503,7 +533,7 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
   }
   for (let i = 0; i < 2; i++) {
     const st = buildStump(seed.rng(`stump/${i}`));
-    const m = new Mesh(st.geometry, deadwoodMaterial(spruceBark));
+    const m = new Mesh(st.geometry, deadwoodMaterial(deadBark, undefined, deadProfile));
     m.position.set(8 + i * 6, 0, DZ);
     m.castShadow = true;
     m.receiveShadow = true;

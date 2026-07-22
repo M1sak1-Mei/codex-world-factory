@@ -19,4 +19,6 @@ for (const sp of TREE_SPECIES) {
     `${sp.id.padEnd(10)} R1: bark ${bark1} + cards ${fol1} = ${bark1 + fol1}   R2: bark ${bark2} + cards ${fol2} = ${bark2 + fol2}  anchors ${t1.stats.anchors}`,
   );
 }
-console.log(`avg R1 ${Math.round(totalR1 / 6)}  avg R2 ${Math.round(totalR2 / 6)}`);
+console.log(
+  `avg R1 ${Math.round(totalR1 / TREE_SPECIES.length)}  avg R2 ${Math.round(totalR2 / TREE_SPECIES.length)}`,
+);

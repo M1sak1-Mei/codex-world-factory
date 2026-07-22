@@ -346,7 +346,22 @@ export const WILLOW: SpeciesParams = {
   crown: 'dome',
   asym: 0.48,
   flare: { amp: 0.5, height: 0.75, lobes: 5 },
-  barkLayer: 2,
+  foliage: BIRCH.foliage
+    ? {
+        ...BIRCH.foliage,
+        clusterSize: [3, 5],
+        scale: [0.12, 0.19],
+        leaf: {
+          ...BIRCH.foliage.leaf,
+          len: 1.24,
+          width: 0.23,
+          shapePow: 1.05,
+          fold: 0.18,
+          curl: 0.34,
+        },
+      }
+    : null,
+  barkLayer: 7,
   barkRepeats: 3,
   foliageColor: { r: 0.08, g: 0.17, b: 0.045, hueVar: 0.3 },
   stubChance: 0.04,

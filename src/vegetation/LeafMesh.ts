@@ -49,7 +49,7 @@ export function buildLeaf(
 ): void {
   const ROWS = Math.max(4, detail?.rows ?? 4);
   const heroOak = (detail?.lobes ?? 0) > 0;
-  const COLS = heroOak ? 5 : 3;
+  const COLS = Math.max(3, detail?.columns ?? (heroOak ? 5 : 3));
   const centerCol = Math.floor(COLS / 2);
   const L = shape.len;
   const W = shape.width;
@@ -172,6 +172,7 @@ export function buildNeedleSpray(
   flex: number,
   phase: number,
   ao: number,
+  detail?: HeroLeafGeometryProfile,
 ): void {
   const SEGS = 4;
   const L = scale;
@@ -234,16 +235,44 @@ export function buildNeedleSpray(
       Math.cos(az) * Math.cos(elev) * 0.35 + swing,
     ).normalize();
     const lenJ = nl * (0.75 + rng.float() * 0.5) * (0.65 + 0.35 * Math.sin(Math.PI * Math.min(1, s * 1.18)));
-    const tip = base.clone().addScaledVector(dir, lenJ);
+    const needleSegs = Math.max(1, detail?.needleSegments ?? 1);
+    const planes = Math.max(1, detail?.needleCrossPlanes ?? 1);
+    const curl = detail?.needleCurl ?? 0;
     // quad across the needle, normal ≈ up-out blend
-    const acrossDir = new Vector3(-dir.z, 0, dir.x).normalize().multiplyScalar(nw * 0.5);
-    const nrm = new Vector3(0, 1, 0).addScaledVector(dir, -0.25).normalize();
+    const across0 = new Vector3(-dir.z, 0, dir.x).normalize();
+    const normal0 = new Vector3().crossVectors(dir, across0).normalize();
     const hueN = hue + (rng.float() - 0.5) * 0.5;
-    const a0 = pushXf(g, m, base.x - acrossDir.x, base.y, base.z - acrossDir.z, nrm.x, nrm.y, nrm.z, 0, 0, hueN, flex, phase, ao * 0.9);
-    const a1 = pushXf(g, m, base.x + acrossDir.x, base.y, base.z + acrossDir.z, nrm.x, nrm.y, nrm.z, 1, 0, hueN, flex, phase, ao * 0.9);
-    const b0 = pushXf(g, m, tip.x - acrossDir.x * 0.25, tip.y, tip.z - acrossDir.z * 0.25, nrm.x, nrm.y, nrm.z, 0.4, 1, hueN, flex * 1.15, phase, ao);
-    const b1 = pushXf(g, m, tip.x + acrossDir.x * 0.25, tip.y, tip.z + acrossDir.z * 0.25, nrm.x, nrm.y, nrm.z, 0.6, 1, hueN, flex * 1.15, phase, ao);
-    g.quad(a0, b0, b1, a1);
+    for (let plane = 0; plane < planes; plane++) {
+      const across = plane === 0 ? across0 : normal0;
+      const rows: number[][] = [];
+      for (let j = 0; j <= needleSegs; j++) {
+        const t = j / needleSegs;
+        const center = base.clone()
+          .addScaledVector(dir, lenJ * t)
+          .add(new Vector3(0, -curl * lenJ * t * t, 0));
+        const tangent = dir.clone().add(new Vector3(0, -2 * curl * t, 0)).normalize();
+        const nrm = new Vector3().crossVectors(tangent, across).normalize();
+        const halfW = nw * 0.5 * (1 - t * 0.78);
+        const edge = across.clone().multiplyScalar(halfW);
+        rows.push([
+          pushXf(
+            g, m, center.x - edge.x, center.y - edge.y, center.z - edge.z,
+            nrm.x, nrm.y, nrm.z, 0, t,
+            hueN, flex * (1 + t * 0.15), phase, ao * (0.9 + t * 0.1),
+          ),
+          pushXf(
+            g, m, center.x + edge.x, center.y + edge.y, center.z + edge.z,
+            nrm.x, nrm.y, nrm.z, 1, t,
+            hueN, flex * (1 + t * 0.15), phase, ao * (0.9 + t * 0.1),
+          ),
+        ]);
+      }
+      for (let j = 0; j < needleSegs; j++) {
+        const a = rows[j] as number[];
+        const b = rows[j + 1] as number[];
+        g.quad(a[0] as number, b[0] as number, b[1] as number, a[1] as number);
+      }
+    }
   }
 }
 
@@ -292,10 +321,12 @@ export function buildSprayAt(
   anchor: LeafAnchor,
   shape: LeafShapeParams,
   rng: Rng,
+  detail?: HeroLeafGeometryProfile,
 ): void {
   _m.compose(anchor.pos, anchor.quat, new Vector3(1, 1, 1));
   buildNeedleSpray(
     g, _m, shape, anchor.scale, rng,
     anchor.hue, 0.5 + rng.float() * 0.3, rng.float() * Math.PI * 2, 1,
+    detail,
   );
 }

@@ -31,6 +31,7 @@ import type { DataTexture, PerspectiveCamera } from 'three';
 import {
   IndirectStorageBufferAttribute,
   IrradianceNode,
+  MeshPhysicalNodeMaterial,
   MeshStandardNodeMaterial,
   StorageBufferAttribute,
   type Renderer,
@@ -817,7 +818,10 @@ export class GroundRing {
     tuft: boolean,
     far = false,
   ): MeshStandardNodeMaterial {
-    const mat = new MeshStandardNodeMaterial();
+    const mat = new MeshPhysicalNodeMaterial();
+    mat.specularIntensity = far ? 0.18 : 0.28;
+    mat.clearcoat = far ? 0 : 0.025;
+    mat.clearcoatRoughness = 0.7;
     const { wc, y, wpos } = fetchRing(bind);
     const h2 = cellHash2(wc, bind.salt ^ 0x9191);
     // patch-level (≈1.6 m) dryness/hue so meadows read as drifts, not noise

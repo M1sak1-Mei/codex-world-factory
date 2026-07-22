@@ -165,6 +165,13 @@ export const BARK_TABLE: readonly BarkParams[] = [
     roughBase: 0.9, roughVar: 0.09, normalK: 4.8,
     crackSharpness: 0.42, secondaryCrack: 0.52, reliefContrast: 1.16,
   },
+  { // 7 willow: damp gray-brown rope furrows with short cross splitting
+    plates: [12, 3], warp: 0.9, fissureW: 0.38, fissureDepth: 0.82, plateRound: 0.26,
+    micro: 0.22, vertCrack: 0.48, lenticels: 0,
+    deep: [0.038, 0.034, 0.027], high: [0.19, 0.175, 0.13], mottle: 0.3,
+    roughBase: 0.88, roughVar: 0.08, normalK: 3.6,
+    crackSharpness: 0.5, secondaryCrack: 0.32, reliefContrast: 1.08,
+  },
 ];
 
 export interface BarkTextures {
