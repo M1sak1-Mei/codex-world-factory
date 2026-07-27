@@ -12,6 +12,7 @@ import {
   worldRecipe,
   type WorldRecipeId,
 } from '../generation/core/WorldRecipe';
+import { parseSeasonId, type SeasonId } from '../vegetation/Seasons';
 
 export type QualityPreset = 'low' | 'high' | 'ultra';
 
@@ -34,6 +35,8 @@ export interface LaasParams {
   landscapeExclude: LandscapeTag[];
   /** composition of procedural feature libraries placed on the terrain */
   worldRecipe: WorldRecipeId;
+  /** foliage presentation only; does not reroll terrain or scatter */
+  season: SeasonId;
   /** HUD visible at boot */
   hud: boolean;
   /** camera pose: "px,py,pz,yaw,pitch[,fov]" */
@@ -72,6 +75,7 @@ export function parseParams(search: string = window.location.search): LaasParams
     landscapeInclude: parseLandscapeTags(q.get('include')),
     landscapeExclude: parseLandscapeTags(q.get('exclude')),
     worldRecipe: worldRecipeId,
+    season: parseSeasonId(q.get('season')),
     // full debug panel hidden by default — F3 toggles it (fps chip always on)
     hud: q.get('hud') === '1',
     cam: q.get('cam'),

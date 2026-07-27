@@ -54,15 +54,18 @@ seed stream 决定；极端山地或涉水地块会被跳过，让城市降级�
 
 ## 世界生成逻辑
 
-世界由三个相互独立的输入维度组合：
+世界由四个相互独立的生成维度组合；季节是其上的表现层，不会重新抽取地形或摆放：
 
 ```text
-World = Seed × TerrainRecipe × WorldRecipe
+World = Seed × TerrainRecipe × LandscapeProfile × WorldRecipe
+Presentation = World × Season
 ```
 
 - `seed`：控制可复现的伪随机变化。
 - `terrain`：控制山脉、裂谷、火山口等宏观地貌。
+- `landscape`：控制生态密度、沙地/雪地和人工地表等景观倾向。
 - `world`：控制遗迹、建筑、道路等地形之上的内容组合。
+- `season`：只控制叶色、落叶比例、冠层透光和远景植被表现。
 
 完整启动链如下：
 
@@ -175,6 +178,11 @@ GPU clustered-Poisson scatter 和跟随相机的 `GroundRing` 都消费同一份
 | `basin-country` | 被不对称高地环绕的开阔盆地。 |
 | `desert-mesas` | 干旱平原上的硬质台地与孤峰。 |
 | `glacial-uplands` | 高地肩部、冰川槽谷和雪地构图。 |
+| `canyon-badlands` | 被主峡谷与支峡谷切开的硬质台地和干燥阶地。 |
+| `dune-oasis` | 平行沙丘、丘间洼地和受庇护绿洲盆地。 |
+| `coastal-islands` | 主岛、外海小岛、潮汐水道和被淹没的低地。 |
+| `karst-sinklands` | 石灰岩峰林、复合落水洞和封闭盆地。 |
+| `volcanic-highlands` | 盾状火山、嵌套火山口、寄生锥和熔岩缺口。 |
 
 ### 顶层世界配方
 
@@ -209,7 +217,7 @@ GPU clustered-Poisson scatter 和跟随相机的 `GroundRing` 都消费同一份
 | 模块 | 当前能力 |
 |---|---|
 | Terrain | 高度场、Gaussian stamps、侵蚀、水文、河流、湖泊、生物群系、积雪、CDLOD。 |
-| Vegetation | 8 类树木、程序化枝干与树冠、3 类灌木、蕨类、3 类花、倒木、草地和地面碎屑。 |
+| Vegetation | 8 类树木、四季冠层、程序化枝干与树冠、3 类灌木、蕨类、3 类花、4 种仙人掌形态、倒木、草地和地面碎屑。 |
 | GPU scatter | clustered-Poisson 分布、分层排除、GPU culling、间接绘制和 LOD ring。 |
 | Lighting | 四级 CSM、PCSS、接触阴影、terrain-relative irradiance probes、GTAO。 |
 | Atmosphere | Hillaire LUT 大气、体积云、云影、雾和林冠光束。 |
@@ -264,9 +272,10 @@ http://127.0.0.1:5173/?world=fantasy-city&terrain=laas&seed=84&preset=low
 |---|---|---|
 | `seed` | `42` | 世界主种子。 |
 | `terrain` | `folded-ranges` | 地形配方。 |
-| `landscape` | `balanced` / `wild` / `settled` / `paved` / `arid` / `alpine` / `legacy` | 地貌、生态和地表预设。 |
+| `landscape` | `balanced` / `wild` / `settled` / `paved` / `arid` / `alpine` / `oasis` / `coastal` / `moorland` / `legacy` | 地貌、生态和地表预设。 |
 | `include` | `plains,forest,flowers,cobble` | 强制启用的景观标签，逗号分隔。 |
 | `exclude` | `desert,snow,concrete` | 禁止生成的景观标签；优先级最高。 |
+| `season` | `spring` / `summer` / `autumn` / `winter` | 植被季节；默认 `summer`，不改变 seed 布局。 |
 | `world` | `magic-forest-ruins` | 顶层世界内容组合。 |
 | `preset` | `low` / `high` / `ultra` | 质量配置。 |
 | `T` | `16.7` | 时间，单位为小时。 |
@@ -575,6 +584,15 @@ http://127.0.0.1:5173/?terrain=desert-mesas&landscape=arid&include=desert&exclud
 # 冰川雪原和高山
 http://127.0.0.1:5173/?terrain=glacial-uplands&landscape=alpine&include=mountains,snow&exclude=desert,concrete&seed=9&preset=low
 
+# 沙丘绿洲和程序化仙人掌；不要城市、遗迹和铺装
+http://127.0.0.1:5173/?world=wilderness&terrain=dune-oasis&landscape=oasis&include=desert,cacti,wetland&exclude=cobble,concrete&season=summer&seed=73&preset=low
+
+# 秋季海岛森林
+http://127.0.0.1:5173/?world=wilderness&terrain=coastal-islands&landscape=coastal&include=forest,wetland&exclude=cobble,concrete&season=autumn&seed=31&preset=low
+
+# 冬季喀斯特峰林；阔叶落叶，针叶树保留大部分冠层
+http://127.0.0.1:5173/?world=wilderness&terrain=karst-sinklands&landscape=moorland&include=hills,shrubs&exclude=desert,cobble,concrete&season=winter&seed=115&preset=low
+
 # 完全复现升级前的自然地形参数
 http://127.0.0.1:5173/?terrain=laas&landscape=legacy&seed=42&preset=low
 ```
@@ -590,6 +608,9 @@ http://127.0.0.1:5173/?terrain=laas&landscape=legacy&seed=42&preset=low
 | `paved` | 大尺度铺装路网：石质主轴、混凝土横轴、环路、四条放射支路、中央广场与道路节点。 |
 | `arid` | 干旱、低植被、高沙地权重，适合荒漠和台地。 |
 | `alpine` | 更强山体、岩石细节和积雪，减少平原和低地植被。 |
+| `oasis` | 沙地与干旱占主导，同时保留局部湿地和草地，仙人掌密度最高。 |
+| `coastal` | 高湿地、草甸和沙岸权重，适合群岛、海岸低地和河口。 |
+| `moorland` | 多丘陵、泥炭洼地、灌木和草地，森林较疏、无仙人掌。 |
 
 ### 可包含/排除的标签
 
@@ -597,13 +618,14 @@ http://127.0.0.1:5173/?terrain=laas&landscape=legacy&seed=42&preset=low
 |---|---|
 | 地貌 | `mountains`, `hills`, `plains`, `basins` |
 | 生态 | `forest`, `meadow`, `wetland`, `desert`, `snow` |
-| 地表覆盖 | `grass`, `shrubs`, `flowers` |
+| 地表覆盖 | `grass`, `shrubs`, `flowers`, `cacti` |
 | 人工/特殊地表 | `cobble`, `concrete`；沙地由 `desert` 同时开启 |
 
 ### 新增地形与生态能力
 
-- 地形配方增加 `rolling-lowlands`、`basin-country`、`desert-mesas`、
-  `glacial-uplands`；连同原有配方共 8 种宏观构图。
+- 地形配方增加 `rolling-lowlands`、`basin-country`、`desert-mesas`、`glacial-uplands`、
+  `canyon-badlands`、`dune-oasis`、`coastal-islands`、`karst-sinklands` 和
+  `volcanic-highlands`；连同原有配方共 13 种宏观构图。
 - 每个 `TerrainRecipe` 现在拥有独立 `foundation`，可分别控制原始高山、喀斯特、湖盆、
   主河谷、支谷和远景山脉；Gaussian 不再被迫叠加在相同的双山骨架上。
 - CDLOD 接缝使用更深的双面 skirt，远景壳只在方形世界边缘保留窄重叠带；默认出生点
@@ -626,6 +648,11 @@ http://127.0.0.1:5173/?terrain=laas&landscape=legacy&seed=42&preset=low
 - 树木目录由 6 种扩展到 8 种：云杉、松树、山毛榉、白桦、喀斯特曲木、枯立木、
   古橡树和河岸柳树。现有榛树灌木、粉花灌木、杜松、蕨类、伞形花、铃形花和雏菊继续保留，
   且草、灌木、花可以分别包含或排除。
+- 新增仙人掌生态类和 4 个确定性几何变体：柱状仙人掌、桶形仙人掌、掌状仙人掌和群生柱体。
+  GPU scatter 根据沙地、干燥度、积雪、坡度以及 `desert` / `cacti` 权重决定出现位置；
+  `exclude=cacti` 只移除仙人掌，不会连带关闭整个沙漠。
+- 新增 `spring`、`summer`、`autumn`、`winter` 四季表现。阔叶树冬季落叶，针叶树保留大部分针叶；
+  atlas、实体叶、远景 impostor、冠层 GI 和阴影代理消费同一季节覆盖率，切换季节不会改变任何位置 seed。
 - 人工地表布局是基于命名 seed stream 生成的普通数据结构；未来道路 graph、城市街区和遗迹模块
   可以注入同一种 path/pad primitive，不需要改写地形材质。
 
@@ -664,9 +691,10 @@ http://127.0.0.1:5173/?scene=veghero&seed=84&preset=low&freeze=1&hud=0
 ```
 
 使用 `species=spruce|pine|beech|birch|karst|snag|oak|willow` 可以在同一个实验室中
-逐个检查全部树种，例如 `?scene=veghero&species=willow&seed=84&preset=low&freeze=1&hud=0`。
+逐个检查全部树种；可追加 `season=spring|summer|autumn|winter` 对比叶色和落叶状态，例如
+`?scene=veghero&species=birch&season=autumn&seed=84&preset=low&freeze=1&hud=0`。
 
-测试使用 `npm run test:assets`；它会验证全部树种的配置与骨架不变性、树皮层唯一性、
+测试使用 `npm run test:assets` 和 `npm run test:ecology`；它们会验证全部树种的配置与骨架不变性、树皮层唯一性、
 裂叶/曲面阔叶、曲线交叉针叶、Physical Node 材质、微法线、岩石 LOD、枯木和小型植被。
 
 全部自然素材的七项准入门槛、PBR/微几何要求、LOD 预算、物种接入流程和提交检查清单见

@@ -18,6 +18,7 @@ import { bakeBarkTextures, type BarkTextures } from '../gpu/passes/BarkSynth';
 import { TREE_VARIANTS, VegClass } from '../gpu/passes/Scatter';
 import {
   barkTexturedMaterial,
+  cactusMaterial,
   deadwoodMaterial,
   flowerMaterial,
   foliageCardMaterial,
@@ -25,11 +26,17 @@ import {
   rockMaterial,
 } from '../render/VegMaterials';
 import { buildLog, buildStump, type DecayState } from './Deadfall';
+import { buildCactus } from './AridPlants';
 import { captureFoliageAtlas } from './FoliageCards';
 import { twigGeometry } from './GroundCover';
 import { captureImpostor, type ImpostorAtlas, type ImpostorPart } from './Impostors';
 import { buildRock } from './RockBuilder';
 import { TREE_SPECIES } from './Species';
+import {
+  seasonalFoliageStyle,
+  treeSeasonCoverages,
+  type SeasonId,
+} from './Seasons';
 import { buildTree, type HeroDiet } from './TreeBuilder';
 import {
   buildFern,
@@ -97,6 +104,8 @@ export interface VegLib {
   clsMaxDist: number[];
   atlases: Map<string, DataTexture>;
   barks: Map<number, BarkTextures>;
+  /** tree-class ordered seasonal leaf retention for canopy/shadow proxies */
+  treeCoverage: number[];
 }
 
 const FLOWER_COLOR: Record<FlowerKind, { r: number; g: number; b: number }> = {
@@ -134,13 +143,22 @@ export async function buildVegLibrary(
   renderer: Renderer,
   seed: WorldSeed,
   progress: (p: number, msg: string) => void = () => {},
+  season: SeasonId = 'summer',
 ): Promise<VegLib> {
   // ---- shared captures -------------------------------------------------------
   progress(0, 'veg: capturing foliage atlases');
   const atlases = new Map<string, DataTexture>();
   for (const sp of [...TREE_SPECIES, ...UNDERSTORY_SPECIES, FERN_CAPTURE]) {
     if (!sp.foliage || atlases.has(sp.id)) continue;
-    atlases.set(sp.id, await captureFoliageAtlas(renderer, sp, seed.rng(`cards/${sp.id}`)));
+    atlases.set(
+      sp.id,
+      await captureFoliageAtlas(
+        renderer,
+        sp,
+        seed.rng(`cards/${sp.id}`),
+        seasonalFoliageStyle(sp, season),
+      ),
+    );
   }
   progress(0.2, 'veg: baking bark textures');
   const barks = new Map<number, BarkTextures>();
@@ -220,7 +238,11 @@ export async function buildVegLibrary(
         r0.push({
           geo: t0.foliageMesh,
           tris: t0.foliageMesh.index ? t0.foliageMesh.index.count / 3 : 0,
-          make: () => foliageMaterial({ color: sp.foliageColor }, surface.leaf),
+          make: () => foliageMaterial(
+            { color: sp.foliageColor },
+            surface.leaf,
+            seasonalFoliageStyle(sp, season),
+          ),
           // cards already cast equivalent crown coverage — mesh-leaf shadow
           // casting would double the caster load for no visible gain
           castShadow: false,
@@ -385,6 +407,33 @@ export async function buildVegLibrary(
     }
     clsMaxDist[cls] = 90;
   }
+
+  // cacti: four real geometry forms share one waxy ribbed PBR material.
+  // Scatter owns habitat placement; the asset library knows no biome rules.
+  for (let v = 0; v < 4; v++) {
+    const geo = buildCactus(seed.rng(`veg/cactus/${v}`), v);
+    const tris = geo.index ? geo.index.count / 3 : 0;
+    const b = bounds([geo]);
+    trackCls(VegClass.Cactus, b.height, b.radius);
+    pools.push({
+      cls: VegClass.Cactus,
+      variant: v,
+      r1: [
+        {
+          geo,
+          tris,
+          make: cactusMaterial,
+          castShadow: false,
+        },
+      ],
+      r2: null,
+      trisR1: tris,
+      trisR2: 0,
+      height: b.height,
+      radius: b.radius,
+    });
+  }
+  clsMaxDist[VegClass.Cactus] = 260;
 
   // ---- extras: deadfall + boulders/slabs -------------------------------------
   progress(0.86, 'veg: deadfall + boulder pools');
@@ -584,5 +633,14 @@ export async function buildVegLibrary(
   clsMaxDist[VegClass.Branch] = 230;
 
   progress(1, 'veg: pools ready');
-  return { pools, impostors, clsHeight, clsRadius, clsMaxDist, atlases, barks };
+  return {
+    pools,
+    impostors,
+    clsHeight,
+    clsRadius,
+    clsMaxDist,
+    atlases,
+    barks,
+    treeCoverage: treeSeasonCoverages(season),
+  };
 }

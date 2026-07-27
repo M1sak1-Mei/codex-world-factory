@@ -27,6 +27,7 @@ import {
 import { SunSky } from '../sky/SunSky';
 import { captureFoliageAtlas } from '../vegetation/FoliageCards';
 import { OAK, TREE_SPECIES } from '../vegetation/Species';
+import { seasonalFoliageStyle } from '../vegetation/Seasons';
 import { buildTree } from '../vegetation/TreeBuilder';
 import { HERO_DIETS } from '../vegetation/VegLibrary';
 import {
@@ -63,6 +64,7 @@ export async function buildHeroVegetationScene(ctx: WorldContext): Promise<void>
   const requestedSpecies = new URLSearchParams(window.location.search).get('species') ?? 'oak';
   const species = TREE_SPECIES.find((candidate) => candidate.id === requestedSpecies) ?? OAK;
   const surface = vegetationSurfaceProfile(species.id);
+  const seasonStyle = seasonalFoliageStyle(species, params.season);
 
   ctx.progress(0.05, 'hero vegetation: lighting');
   const sunSky = new SunSky(engine, params.timeOfDay);
@@ -85,7 +87,12 @@ export async function buildHeroVegetationScene(ctx: WorldContext): Promise<void>
 
   ctx.progress(0.15, 'hero vegetation: baking oak PBR maps');
   const atlas = species.foliage
-    ? await captureFoliageAtlas(engine.renderer, species, seed.rng(`cards/${species.id}`))
+    ? await captureFoliageAtlas(
+        engine.renderer,
+        species,
+        seed.rng(`cards/${species.id}`),
+        seasonStyle,
+      )
     : null;
   const bark = await bakeBarkTextures(
     engine.renderer,
@@ -143,6 +150,7 @@ export async function buildHeroVegetationScene(ctx: WorldContext): Promise<void>
         foliageMaterial(
           { color: species.foliageColor },
           variant.enhanced ? surface.leaf : undefined,
+          seasonStyle,
         ),
       );
       leaves.position.copy(trunk.position);

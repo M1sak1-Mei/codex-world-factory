@@ -21,6 +21,7 @@ import {
   type LandscapeProfileId,
   type LandscapeTag,
 } from '../src/world/LandscapeProfile';
+import { SEASON_IDS, isSeasonId, type SeasonId } from '../src/vegetation/Seasons';
 
 type QualityPreset = 'low' | 'high' | 'ultra';
 
@@ -32,6 +33,7 @@ export interface TerrainBatchEntry {
   landscapeInclude: LandscapeTag[];
   landscapeExclude: LandscapeTag[];
   worldRecipe: WorldRecipeId;
+  season: SeasonId;
   seed: number;
   shot: number;
   url: string;
@@ -54,6 +56,7 @@ export interface BuildTerrainBatchOptions {
   landscapeProfile?: LandscapeProfileId;
   landscapeInclude?: readonly LandscapeTag[];
   landscapeExclude?: readonly LandscapeTag[];
+  seasons?: readonly SeasonId[];
 }
 
 interface Flags {
@@ -131,11 +134,22 @@ function parseLandscapeProfile(value: string): LandscapeProfileId {
   );
 }
 
+function parseSeasons(value: string): SeasonId[] {
+  const ids = value.split(',').map((part) => part.trim());
+  for (const id of ids) {
+    if (!isSeasonId(id)) {
+      throw new Error(`seasons: unknown season ${id}; expected ${SEASON_IDS.join(', ')}`);
+    }
+  }
+  return ids as SeasonId[];
+}
+
 export function buildTerrainBatch(options: BuildTerrainBatchOptions): TerrainBatchManifest {
   const entries: TerrainBatchEntry[] = [];
   const landscapeProfile = options.landscapeProfile ?? 'balanced';
   const landscapeInclude = [...(options.landscapeInclude ?? [])];
   const landscapeExclude = [...(options.landscapeExclude ?? [])];
+  const seasons = [...(options.seasons ?? ['summer'])];
   for (const recipeId of options.recipes) {
     for (const rawSeed of options.seeds) {
       if (!Number.isSafeInteger(rawSeed) || rawSeed < 0 || rawSeed > 0xffff_ffff) {
@@ -145,31 +159,39 @@ export function buildTerrainBatch(options: BuildTerrainBatchOptions): TerrainBat
         if (!Number.isInteger(shot) || shot < 1 || shot > 9) {
           throw new Error(`shot must be in 1..9; received ${shot}`);
         }
-        const url = new URL(options.baseUrl);
-        url.searchParams.set('scene', 'world');
-        url.searchParams.set('seed', String(rawSeed));
-        url.searchParams.set('terrain', recipeId);
-        url.searchParams.set('landscape', landscapeProfile);
-        if (landscapeInclude.length > 0) url.searchParams.set('include', landscapeInclude.join(','));
-        if (landscapeExclude.length > 0) url.searchParams.set('exclude', landscapeExclude.join(','));
-        url.searchParams.set('world', options.worldRecipe);
-        url.searchParams.set('preset', options.preset);
-        url.searchParams.set('shot', String(shot));
-        url.searchParams.set('T', String(options.timeOfDay));
-        url.searchParams.set('freeze', '1');
-        url.searchParams.set('hud', '0');
-        entries.push({
-          id: `${recipeId}-${landscapeProfile}-s${rawSeed}-shot${shot}`,
-          recipe: recipeId,
-          recipeLabel: terrainRecipe(recipeId).label,
-          landscapeProfile,
-          landscapeInclude,
-          landscapeExclude,
-          worldRecipe: options.worldRecipe,
-          seed: rawSeed,
-          shot,
-          url: url.toString(),
-        });
+        for (const season of seasons) {
+          const url = new URL(options.baseUrl);
+          url.searchParams.set('scene', 'world');
+          url.searchParams.set('seed', String(rawSeed));
+          url.searchParams.set('terrain', recipeId);
+          url.searchParams.set('landscape', landscapeProfile);
+          if (landscapeInclude.length > 0) {
+            url.searchParams.set('include', landscapeInclude.join(','));
+          }
+          if (landscapeExclude.length > 0) {
+            url.searchParams.set('exclude', landscapeExclude.join(','));
+          }
+          url.searchParams.set('world', options.worldRecipe);
+          url.searchParams.set('season', season);
+          url.searchParams.set('preset', options.preset);
+          url.searchParams.set('shot', String(shot));
+          url.searchParams.set('T', String(options.timeOfDay));
+          url.searchParams.set('freeze', '1');
+          url.searchParams.set('hud', '0');
+          entries.push({
+            id: `${recipeId}-${landscapeProfile}-${season}-s${rawSeed}-shot${shot}`,
+            recipe: recipeId,
+            recipeLabel: terrainRecipe(recipeId).label,
+            landscapeProfile,
+            landscapeInclude,
+            landscapeExclude,
+            worldRecipe: options.worldRecipe,
+            season,
+            seed: rawSeed,
+            shot,
+            url: url.toString(),
+          });
+        }
       }
     }
   }
@@ -186,9 +208,10 @@ function usage(): string {
     '  --shots 1,5,9',
     '  --preset low|high|ultra',
     '  --world wilderness|magic-forest-ruins|fantasy-city',
-    '  --landscape legacy|balanced|wild|settled|paved|arid|alpine',
-    '  --include hills,plains,forest,flowers,cobble',
+    '  --landscape legacy|balanced|wild|settled|paved|arid|alpine|oasis|coastal|moorland',
+    '  --include hills,plains,forest,flowers,cacti,cobble',
     '  --exclude desert,snow,concrete',
+    '  --seasons spring,summer,autumn,winter',
     '  --time 11',
     '  --base-url http://127.0.0.1:5173/',
     '  --out generated/terrain-batch.json',
@@ -209,6 +232,7 @@ async function main(): Promise<void> {
   const landscapeProfile = parseLandscapeProfile(stringFlag(flags, 'landscape', 'balanced'));
   const landscapeInclude = parseLandscapeTags(stringFlag(flags, 'include', ''));
   const landscapeExclude = parseLandscapeTags(stringFlag(flags, 'exclude', ''));
+  const seasons = parseSeasons(stringFlag(flags, 'seasons', 'summer'));
   const timeOfDay = Number(stringFlag(flags, 'time', '11'));
   if (!Number.isFinite(timeOfDay) || timeOfDay < 0 || timeOfDay > 24) {
     throw new Error(`time must be in 0..24; received ${timeOfDay}`);
@@ -224,6 +248,7 @@ async function main(): Promise<void> {
     landscapeProfile,
     landscapeInclude,
     landscapeExclude,
+    seasons,
   });
   const out = stringFlag(flags, 'out', 'generated/terrain-batch.json');
   await mkdir(dirname(out), { recursive: true });

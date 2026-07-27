@@ -16,6 +16,7 @@ import { addScatterDebug } from './ScatterDebug';
 import { Forests } from '../vegetation/Forests';
 import { GroundRing } from '../vegetation/GroundRing';
 import { buildVegLibrary } from '../vegetation/VegLibrary';
+import { treeSeasonCoverages } from '../vegetation/Seasons';
 import { CausticsBake, setCausticContext } from '../render/Caustics';
 import { setWindContext, windU } from '../render/Wind';
 import { sunU, updateSunUniforms } from '../render/VegMaterials';
@@ -100,7 +101,11 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
   const scatter = await runScatter(engine.renderer, hf, seed, {
     exclusions: scatterExclusions,
   });
-  const canopyTex = await buildCanopyMap(engine.renderer, scatter.trees);
+  const canopyTex = await buildCanopyMap(
+    engine.renderer,
+    scatter.trees,
+    treeSeasonCoverages(params.season),
+  );
   engine.stats.counters['veg.trees'] = scatter.trees.count;
   engine.stats.counters['veg.under'] = scatter.understory.count;
   engine.stats.counters['veg.extras'] = scatter.extras.count;
@@ -210,8 +215,11 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
   // Phase 5: variant pools + GPU cull → compacted indirect draws
   let forestsRef: Forests | null = null;
   if (view !== 'scatter' && !ablate.has('veg')) {
-    const lib = await buildVegLibrary(engine.renderer, seed, (p, m) =>
-      ctx.progress(0.963 + p * 0.006, m),
+    const lib = await buildVegLibrary(
+      engine.renderer,
+      seed,
+      (p, m) => ctx.progress(0.963 + p * 0.006, m),
+      params.season,
     );
     const forests = new Forests(
       hf,

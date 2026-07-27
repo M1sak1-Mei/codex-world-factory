@@ -40,9 +40,27 @@ Available recipes:
 | `basin-country` | An inhabited basin with asymmetric rims. |
 | `desert-mesas` | Separate hard tablelands over a dry plain. |
 | `glacial-uplands` | High shoulders and a scooped glacial trough. |
+| `canyon-badlands` | Two hard tablelands cut by a trunk and branch canyon. |
+| `dune-oasis` | Parallel dune swells around an interdune oasis bowl. |
+| `coastal-islands` | Drowned lowlands, a hooked main island, islets, and tidal channels. |
+| `karst-sinklands` | Limestone towers around overlapping sinkholes. |
+| `volcanic-highlands` | Shield volcano, summit crater, parasitic cone, and lava breach. |
 
 An unknown recipe safely falls back to `laas`. The same recipe and seed always
 resolve to the same stamp positions, rotations, and amplitudes.
+
+Terrain shape and ecology remain separate controls. Pair a recipe with a
+`landscape` profile to choose its ground cover and habitat, for example:
+
+```text
+?terrain=dune-oasis&landscape=oasis&include=desert,cacti,wetland
+?terrain=coastal-islands&landscape=coastal&season=autumn
+?terrain=karst-sinklands&landscape=moorland&season=winter
+```
+
+`season` only changes foliage colour, leaf retention, canopy transmission,
+shadows, and impostors. It does not change recipe stamps, hydrology, or scatter
+positions.
 
 ## Generate and render a batch
 
@@ -82,6 +100,7 @@ Useful batch options:
 | `terrain:batch` | `--shots` | `1` |
 | `terrain:batch` | `--preset` | `low` |
 | `terrain:batch` | `--time` | `11` |
+| `terrain:batch` | `--seasons` | `summer` (comma-separated) |
 | `terrain:batch` | `--out` | `generated/terrain-batch.json` |
 | `terrain:shoot` | `--limit` | all entries |
 | `terrain:shoot` | `--settle` | 24 frames |

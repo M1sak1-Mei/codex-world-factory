@@ -33,6 +33,7 @@ import { buildLeaf, buildNeedleSpray } from './LeafMesh';
 import { MeshGrower } from './TubeMesh';
 import type { LeafAnchor, SpeciesParams } from './VegTypes';
 import { vegetationSurfaceProfile } from './VegetationProfiles';
+import type { SeasonalFoliageStyle } from './Seasons';
 
 export const ATLAS_RES = 1024;
 
@@ -117,12 +118,16 @@ function buildTwigTile(
 }
 
 /** capture material: sqrt-encoded albedo as emissive, no lights involved */
-function captureMaterial(sp: SpeciesParams): MeshStandardNodeMaterial {
+function captureMaterial(
+  sp: SpeciesParams,
+  season?: SeasonalFoliageStyle,
+): MeshStandardNodeMaterial {
   const mat = new MeshStandardNodeMaterial();
   const d = attribute('vdata', 'vec4') as unknown as NV4;
   const u = uv() as unknown as NV2;
   const c = sp.foliageColor;
-  const base = vec3(c.r, c.g, c.b);
+  const tint = season?.tint ?? [1, 1, 1];
+  const base = vec3(c.r, c.g, c.b).mul(vec3(tint[0], tint[1], tint[2]));
   // per-leaf hue/value variation + simple vein/tip accents painted into uv
   const k = d.x.mul(c.hueVar);
   const warmed = base
@@ -149,6 +154,14 @@ function captureMaterial(sp: SpeciesParams): MeshStandardNodeMaterial {
   mat.emissiveNode = sqrt(albedo.clamp(0, 1) as unknown as NF) as unknown as ReturnType<typeof vec3>;
   mat.roughness = 1;
   mat.side = DoubleSide;
+  if (season && season.coverage < 0.999) {
+    // d.z is a stable per-leaf phase. Remove complete leaves in the capture,
+    // so cluster cards and the far impostor inherit the same crown density.
+    const keep = d.z.mul(12.9898).sin().mul(43758.5453).fract()
+      .lessThan(season.coverage);
+    mat.opacityNode = keep.select(float(1), float(0));
+    mat.alphaTest = 0.5;
+  }
   return mat;
 }
 
@@ -210,13 +223,14 @@ export async function captureFoliageAtlas(
   renderer: Renderer,
   sp: SpeciesParams,
   rng: Rng,
+  season?: SeasonalFoliageStyle,
 ): Promise<DataTexture> {
   const scene = new Scene();
   const g = new MeshGrower();
   for (let v = 0; v < 4; v++) {
     buildTwigTile(g, sp, rng.fork(`tile${v}`), (v % 2) - 0.5, Math.floor(v / 2) - 0.5);
   }
-  const mesh = new Mesh(g.build(), captureMaterial(sp));
+  const mesh = new Mesh(g.build(), captureMaterial(sp, season));
   mesh.frustumCulled = false;
   scene.add(mesh);
 

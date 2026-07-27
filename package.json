@@ -16,8 +16,9 @@
     "test:landscape": "tsx --test tools/landscape-profiles.test.ts",
     "test:city": "tsx --test tools/city-buildings.test.ts",
     "test:vegetation": "tsx --test tools/vegetation-tiers.test.ts",
+    "test:ecology": "tsx --test tools/ecology-expansion.test.ts",
     "test:assets": "tsx --test tools/natural-assets.test.ts tools/vegetation-tiers.test.ts",
-    "test:world": "tsx --test tools/camera-ground.test.ts tools/gpu-limits.test.ts tools/terrain-recipes.test.ts tools/landscape-profiles.test.ts tools/world-features.test.ts tools/city-buildings.test.ts tools/vegetation-tiers.test.ts tools/natural-assets.test.ts",
+    "test:world": "tsx --test tools/camera-ground.test.ts tools/gpu-limits.test.ts tools/terrain-recipes.test.ts tools/landscape-profiles.test.ts tools/world-features.test.ts tools/city-buildings.test.ts tools/vegetation-tiers.test.ts tools/natural-assets.test.ts tools/ecology-expansion.test.ts",
     "compare": "tsx tools/compare.ts",
     "battery": "tsx tools/battery.ts"
   },

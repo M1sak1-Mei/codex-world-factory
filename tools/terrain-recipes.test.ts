@@ -80,7 +80,28 @@ test('batch manifest is a deterministic Cartesian product', () => {
   assert.equal(url.searchParams.get('landscape'), 'arid');
   assert.equal(url.searchParams.get('include'), 'desert');
   assert.equal(url.searchParams.get('exclude'), 'snow,concrete');
+  assert.equal(url.searchParams.get('season'), 'summer');
   assert.equal(url.searchParams.get('freeze'), '1');
+});
+
+test('batch manifest can expand the same world across seasons', () => {
+  const manifest = buildTerrainBatch({
+    baseUrl: 'http://127.0.0.1:5173/',
+    recipes: ['dune-oasis'],
+    seeds: [73],
+    shots: [1],
+    preset: 'low',
+    timeOfDay: 11,
+    worldRecipe: 'wilderness',
+    landscapeProfile: 'oasis',
+    seasons: ['spring', 'autumn', 'winter'],
+  });
+  assert.equal(manifest.entries.length, 3);
+  assert.deepEqual(manifest.entries.map((entry) => entry.season), [
+    'spring',
+    'autumn',
+    'winter',
+  ]);
 });
 
 test('integer list parser supports inclusive ranges', () => {

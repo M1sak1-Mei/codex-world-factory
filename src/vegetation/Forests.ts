@@ -116,7 +116,7 @@ const TREE_POOL_COUNT = TREE_SPECIES_COUNT * 4;
 const TREE_RING_GROUPS = TREE_POOL_COUNT * 2;
 const IMPOSTOR_START = TREE_RING_GROUPS;
 const UNDER_START = IMPOSTOR_START + TREE_SPECIES_COUNT;
-const UNDER_CLASS_COUNT = 7;
+const UNDER_CLASS_COUNT = 8;
 const EXTRA_START = UNDER_START + UNDER_CLASS_COUNT * 4;
 const EXTRA_CLASS_START = 16;
 const EXTRA_CLASS_COUNT = 8;
@@ -144,7 +144,7 @@ function groupOf(cls: number, variant: number, ring: 0 | 1 | 2 | 3): number {
     if (ring === 3) return IMPOSTOR_START + cls;
     return (cls * 4 + variant) * 2 + (ring - 1);
   }
-  if (cls < 15) return UNDER_START + (cls - 8) * 4 + variant;
+  if (cls < 16) return UNDER_START + (cls - 8) * 4 + variant;
   const pe = (cls - EXTRA_CLASS_START) * 4 + variant;
   return EXTRA_START + pe * 2 + (ring - 1);
 }
@@ -443,7 +443,7 @@ export class Forests {
     const layerOf = (cls: number): ScatterLayer =>
       cls < TREE_SPECIES_COUNT
         ? this.scatter.trees
-        : cls < 15
+        : cls < 16
           ? this.scatter.understory
           : cls < 20
             ? this.scatter.extras
@@ -496,7 +496,7 @@ export class Forests {
         return { fadeInAt: R2_FAR, band: BAND2 };
       }
       const maxD = this.lib.clsMaxDist[cls] ?? 150;
-      if (cls < 15) return { fadeOutAt: maxD - 15, band: 15 };
+      if (cls < 16) return { fadeOutAt: maxD - 15, band: 15 };
       const hasR2 = cls === 18 || cls === 19 || cls === 20 || cls === 21 || cls === 23;
       if (ring === 1)
         return hasR2
@@ -521,9 +521,11 @@ export class Forests {
         .includes('casters');
       const ringCasts =
         !ablateCasters &&
-        (pool.cls < TREE_SPECIES_COUNT ? true : pool.cls < 15 ? false : true);
+        (pool.cls < TREE_SPECIES_COUNT ? true : pool.cls < 16 ? false : true);
       const crownDensity =
-        pool.cls < TREE_SPECIES_COUNT ? CROWN_SHADOW_DENSITY[pool.cls] ?? 0 : 0;
+        pool.cls < TREE_SPECIES_COUNT
+          ? (CROWN_SHADOW_DENSITY[pool.cls] ?? 0) * (lib.treeCoverage[pool.cls] ?? 1)
+          : 0;
       // fit the shadow proxy to THIS pool's real extents (R1 union bbox)
       let poolDims: CrownDims | null = null;
       if (crownDensity > 0) {
@@ -563,7 +565,7 @@ export class Forests {
           ? pool.cls === 5
             ? { k: 0.45, freq: 0.8, h0: 6 }
             : { k: 1, freq: 1, h0: 6 }
-          : pool.cls < 15
+          : pool.cls < 16
             ? { k: 1, freq: 1.8, h0: 0.9 }
             : undefined;
       for (const { ring, parts } of rings) {

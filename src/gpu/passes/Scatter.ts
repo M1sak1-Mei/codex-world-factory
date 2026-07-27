@@ -68,6 +68,7 @@ export const enum VegClass {
   FlowerUmbel = 12,
   FlowerBell = 13,
   FlowerDaisy = 14,
+  Cactus = 15,
   // ground extras
   Log = 16,
   Stump = 17,
@@ -300,13 +301,15 @@ export const CANOPY_RES = 1024;
 export async function buildCanopyMap(
   renderer: Renderer,
   trees: ScatterLayer,
+  seasonalCoverage: readonly number[] = [],
 ): Promise<StorageTexture> {
   const accum = instancedArray(CANOPY_RES * CANOPY_RES, 'uint').toAtomic();
   const texel = WORLD_SIZE / CANOPY_RES; // 4 m
 
   // crown radius (m at scale 1) and skylight opacity per tree class
   const crownR = [2.9, 2.7, 3.8, 2.7, 3.2, 0.9, 4.3, 3.5];
-  const opacity = [0.85, 0.7, 0.9, 0.65, 0.8, 0.12, 0.92, 0.78];
+  const opacity = [0.85, 0.7, 0.9, 0.65, 0.8, 0.12, 0.92, 0.78]
+    .map((value, cls) => value * (seasonalCoverage[cls] ?? 1));
 
   const splatK = Fn(() => {
     const i = instanceIndex;
@@ -563,7 +566,7 @@ export async function runScatter(
     const treelineFade = float(1).sub(
       smoothstep(TREELINE - 40, TREELINE + 140, s.h),
     );
-    const accept = dens
+    const greenAccept = dens
       .mul(slopeFade)
       .mul(treelineFade)
       .mul(float(1).sub(s.snow.mul(0.9)))
@@ -571,6 +574,15 @@ export async function runScatter(
       .mul(float(1).sub(s.rockExp.mul(0.85)))
       .mul(s.sand.mul(0.94).oneMinus())
       .mul(Math.max(hf.mp.landscape.ecology.shrubs, hf.mp.landscape.ecology.flowers));
+    const cactusControl = float(hf.mp.landscape.ecology.cacti);
+    const cactusAccept = s.sand.pow(0.72)
+      .mul(float(1).sub(smoothstep(0.42, 0.78, s.moisture)))
+      .mul(float(1).sub(s.snow))
+      .mul(slopeFade)
+      .mul(float(hf.mp.landscape.ecology.desert))
+      .mul(cactusControl)
+      .mul(0.14);
+    const accept = greenAccept.max(cactusAccept);
     If(cellHash(cell, sU ^ 0x2477).greaterThanEqual(accept), () => {
       Return();
     });
@@ -598,9 +610,10 @@ export async function runScatter(
       .mul(gapK).mul(flowerControl); // bell
     const w6 = byBiome(s.bioId, [0, 0.12, 0.04, 0.06, 0.28, 0.08])
       .mul(gapK).mul(flowerControl); // daisy
+    const w7 = cactusAccept.mul(float(1.15).sub(canopy.mul(0.35))); // cactus
 
     const r = cellHash(cell, sU ^ 0x59d3).mul(
-      w0.add(w1).add(w2).add(w3).add(w4).add(w5).add(w6),
+      w0.add(w1).add(w2).add(w3).add(w4).add(w5).add(w6).add(w7),
     );
     const cls = int(VegClass.BushHazel).toVar();
     const acc = w0.toVar();
@@ -621,6 +634,10 @@ export async function runScatter(
               acc.addAssign(w5);
               If(r.greaterThan(acc), () => {
                 cls.assign(int(VegClass.FlowerDaisy));
+                acc.addAssign(w6);
+                If(r.greaterThan(acc), () => {
+                  cls.assign(int(VegClass.Cactus));
+                });
               });
             });
           });

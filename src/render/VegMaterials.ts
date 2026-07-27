@@ -31,6 +31,7 @@ import type { NF, NV3, NV4 } from '../gpu/TSLTypes';
 import { applyCaustics } from './Caustics';
 import { runiform } from '../gpu/RenderUniform';
 import type { BarkPbrProfile, LeafPbrProfile } from '../vegetation/VegetationProfiles';
+import type { SeasonalFoliageStyle } from '../vegetation/Seasons';
 
 /**
  * Shared sun uniforms for the foliage translucency term (D-2). Updated by
@@ -343,6 +344,32 @@ export function mushroomMaterial(): MeshStandardNodeMaterial {
   return mat;
 }
 
+/** Waxy ribbed cactus skin; vdata.x > .8 marks flower petals. */
+export function cactusMaterial(): MeshStandardNodeMaterial {
+  const mat = new MeshPhysicalNodeMaterial();
+  const d = vdata();
+  const cuv = uv();
+  const flower = smoothstep(0.82, 0.96, d.x);
+  const body = hueShift(vec3(0.058, 0.19, 0.082), d.x, 0.22)
+    .mul(d.w.mul(0.72).add(0.28));
+  const petal = mix(vec3(0.72, 0.09, 0.2), vec3(1, 0.55, 0.08), cuv.y);
+  mat.colorNode = mix(body, petal, flower);
+  const ribs = cuv.x.mul(Math.PI * 2).cos().abs().pow(7);
+  const skinCells = valueNoise3(positionWorld.mul(21)).mul(0.5).add(0.5);
+  const spinePores = valueNoise3(positionWorld.mul(46)).greaterThan(0.72).select(float(1), float(0));
+  mat.normalNode = bumpMap(
+    ribs.mul(0.74).add(skinCells.mul(0.18)).add(spinePores.mul(0.2)),
+    mix(float(0.16), float(0.04), flower),
+  );
+  mat.roughnessNode = mix(float(0.57), float(0.7), flower);
+  mat.specularIntensity = 0.46;
+  mat.clearcoat = 0.11;
+  mat.clearcoatRoughness = 0.48;
+  mat.metalness = 0;
+  mat.side = DoubleSide;
+  return mat;
+}
+
 export interface FoliageMatParams {
   color: { r: number; g: number; b: number; hueVar: number };
 }
@@ -350,6 +377,7 @@ export interface FoliageMatParams {
 export function foliageMaterial(
   p: FoliageMatParams,
   surface?: LeafPbrProfile,
+  season?: SeasonalFoliageStyle,
 ): MeshStandardNodeMaterial {
   // Physical variant for specularIntensity: white dielectric F0 0.04 at
   // glancing sun desaturates sunlit leaves to SILVER (user) — real leaves
@@ -367,15 +395,29 @@ export function foliageMaterial(
   mat.clearcoat = pbr.clearcoat;
   mat.clearcoatRoughness = pbr.clearcoatRoughness;
   const d = vdata();
-  const base = vec3(p.color.r, p.color.g, p.color.b);
+  const seasonalTint = season?.tint ?? [1, 1, 1];
+  const base = vec3(p.color.r, p.color.g, p.color.b).mul(
+    vec3(seasonalTint[0], seasonalTint[1], seasonalTint[2]),
+  );
   const tinted = hueShift(base, d.x, p.color.hueVar).mul(d.w.mul(0.8).add(0.2));
   // vertex-stage hoist: hue/age are flat per leaf, glow smooth at leaf scale
   mat.colorNode = varying(
     tinted as unknown as Parameters<typeof varying>[0],
   ) as unknown as typeof mat.colorNode;
   mat.emissiveNode = varying(
-    translucency(tinted as unknown as NV3, pbr.transmission) as unknown as Parameters<typeof varying>[0],
+    translucency(
+      tinted as unknown as NV3,
+      pbr.transmission * (season?.transmissionScale ?? 1),
+    ) as unknown as Parameters<typeof varying>[0],
   ) as unknown as typeof mat.emissiveNode;
+  if (season && season.coverage < 0.999) {
+    // vdata.z is constant per generated leaf, so this removes whole leaves
+    // with a stable hash instead of creating fragment-level stipple.
+    const keep = d.z.mul(12.9898).sin().mul(43758.5453).fract()
+      .lessThan(season.coverage);
+    mat.opacityNode = keep.select(float(1), float(0));
+    mat.alphaTest = 0.5;
+  }
   if (pbr.veinNormal > 0) {
     const luv = uv();
     const side = luv.x.sub(0.5).abs();
@@ -393,7 +435,7 @@ export function foliageMaterial(
       float(pbr.veinNormal),
     );
   }
-  mat.roughness = pbr.roughness;
+  mat.roughness = Math.min(1, Math.max(0, pbr.roughness + (season?.roughnessBias ?? 0)));
   mat.metalness = 0;
   mat.side = DoubleSide;
   return mat;
