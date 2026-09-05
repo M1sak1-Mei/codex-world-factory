@@ -111,7 +111,7 @@ export async function buildHeroVegetationScene(ctx: WorldContext): Promise<void>
     ctx.progress(0.3 + i * 0.28, `hero vegetation: ${variant.title.toLowerCase()}`);
     await new Promise((resolve) => setTimeout(resolve, 0));
     const built = buildTree(species, seed.rng(`hero/${species.id}-comparison`), {
-      foliageMode: 'hybrid',
+      foliageMode: seasonStyle.coverage > 0 ? 'hybrid' : 'cards',
       heroSurface: variant.enhanced,
       hero: {
         cardTarget: 1800,
@@ -130,7 +130,7 @@ export async function buildHeroVegetationScene(ctx: WorldContext): Promise<void>
     trunk.receiveShadow = true;
     engine.scene.add(trunk);
 
-    if (built.foliage && atlas) {
+    if (built.foliage && atlas && seasonStyle.coverage > 0) {
       const cards = new Mesh(
         built.foliage,
         foliageCardMaterial(

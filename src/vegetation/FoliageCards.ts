@@ -12,6 +12,7 @@
  */
 
 import {
+  Color,
   DataTexture,
   DoubleSide,
   LinearFilter,
@@ -23,10 +24,11 @@ import {
   Quaternion,
   RenderTarget,
   Scene,
+  type Texture,
   Vector3,
 } from 'three';
 import { MeshStandardNodeMaterial, type Renderer } from 'three/webgpu';
-import { attribute, float, mix, smoothstep, sqrt, uv, vec3 } from 'three/tsl';
+import { attribute, float, mix, normalView, smoothstep, sqrt, uv, vec3, vec4 } from 'three/tsl';
 import type { Rng } from '../core/Seed';
 import type { NF, NV2, NV4 } from '../gpu/TSLTypes';
 import { buildLeaf, buildNeedleSpray } from './LeafMesh';
@@ -36,6 +38,52 @@ import { vegetationSurfaceProfile } from './VegetationProfiles';
 import type { SeasonalFoliageStyle } from './Seasons';
 
 export const ATLAS_RES = 1024;
+
+export interface FoliageAtlasAppearance {
+  /** RG: encoded capture-space normal XY; B: roughness; A: leaf AO. */
+  surface: DataTexture;
+  season?: SeasonalFoliageStyle;
+}
+
+// Keep the public RGBA DataTexture contract used by impostor captures. The
+// companion adds ONE texture binding, not separate normal/roughness/AO maps.
+const appearances = new WeakMap<Texture, FoliageAtlasAppearance>();
+
+export function foliageAtlasAppearance(atlas: Texture): FoliageAtlasAppearance | undefined {
+  return appearances.get(atlas);
+}
+
+/** Pure texture assembly, also used by CPU contract/packing tests. */
+export function createFoliageAtlasTextures(
+  albedo: Uint8Array,
+  surface: Uint8Array,
+  res: number,
+  season?: SeasonalFoliageStyle,
+): DataTexture {
+  if (!Number.isInteger(res) || res < 1 || albedo.length !== res * res * 4 || surface.length !== albedo.length) {
+    throw new Error('foliage atlas requires matching square RGBA buffers');
+  }
+  const makeTexture = (px: Uint8Array): DataTexture => {
+    const tex = new DataTexture(px, res, res);
+    tex.colorSpace = NoColorSpace;
+    tex.generateMipmaps = true;
+    tex.minFilter = LinearMipmapLinearFilter;
+    tex.magFilter = LinearFilter;
+    tex.anisotropy = 4;
+    tex.needsUpdate = true;
+    return tex;
+  };
+  const atlas = makeTexture(albedo);
+  const packed = makeTexture(surface);
+  atlas.name = 'foliage-albedo-coverage';
+  packed.name = 'foliage-normal-roughness-ao';
+  appearances.set(atlas, { surface: packed, season });
+  atlas.addEventListener('dispose', () => {
+    packed.dispose();
+    appearances.delete(atlas);
+  });
+  return atlas;
+}
 
 const _m = new Matrix4();
 const _q = new Quaternion();
@@ -121,6 +169,7 @@ function buildTwigTile(
 function captureMaterial(
   sp: SpeciesParams,
   season?: SeasonalFoliageStyle,
+  surfaceCapture = false,
 ): MeshStandardNodeMaterial {
   const mat = new MeshStandardNodeMaterial();
   const d = attribute('vdata', 'vec4') as unknown as NV4;
@@ -154,6 +203,14 @@ function captureMaterial(
   mat.emissiveNode = sqrt(albedo.clamp(0, 1) as unknown as NF) as unknown as ReturnType<typeof vec3>;
   mat.roughness = 1;
   mat.side = DoubleSide;
+  if (surfaceCapture) {
+    // The capture camera and card UVs share +X/+Y. Fold backfaces into the
+    // forward hemisphere before packing XY so reconstruction is unambiguous.
+    const n = normalView.mul(normalView.z.lessThan(0).select(float(-1), float(1))).normalize();
+    const roughness = float(vegetationSurfaceProfile(sp.id).leaf.roughness)
+      .add(season?.roughnessBias ?? 0).add(d.x.mul(0.035)).clamp(0.58, 0.96);
+    mat.outputNode = vec4(n.xy.mul(0.5).add(0.5), roughness, d.w.clamp(0.5, 1));
+  }
   if (season && season.coverage < 0.999) {
     // d.z is a stable per-leaf phase. Remove complete leaves in the capture,
     // so cluster cards and the far impostor inherit the same crown density.
@@ -215,6 +272,61 @@ function dilate(px: Uint8Array, res: number, passes: number): void {
   }
 }
 
+/** Bleed all packed surface channels using coverage, never treating AO as alpha. */
+export function dilateFoliageSurface(
+  surface: Uint8Array,
+  coverage: Uint8Array,
+  res: number,
+  passes = 6,
+): void {
+  if (surface.length !== res * res * 4 || coverage.length !== surface.length) {
+    throw new Error('foliage surface dilation requires matching RGBA buffers');
+  }
+  const mask = new Uint8Array(res * res);
+  for (let i = 0; i < mask.length; i++) mask[i] = (coverage[i * 4 + 3] ?? 0) > 8 ? 1 : 0;
+  for (let pass = 0; pass < passes; pass++) {
+    const previous = mask.slice();
+    const src = surface.slice();
+    for (let y = 0; y < res; y++) {
+      for (let x = 0; x < res; x++) {
+        const i = y * res + x;
+        if (previous[i]) continue;
+        let red = 0, green = 0, blue = 0, alpha = 0;
+        let count = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx;
+            const yy = y + dy;
+            if (xx < 0 || xx >= res || yy < 0 || yy >= res) continue;
+            const neighbor = yy * res + xx;
+            if (!previous[neighbor]) continue;
+            red += src[neighbor * 4];
+            green += src[neighbor * 4 + 1];
+            blue += src[neighbor * 4 + 2];
+            alpha += src[neighbor * 4 + 3];
+            count++;
+          }
+        }
+        if (count === 0) continue;
+        surface[i * 4] = Math.round(red / count);
+        surface[i * 4 + 1] = Math.round(green / count);
+        surface[i * 4 + 2] = Math.round(blue / count);
+        surface[i * 4 + 3] = Math.round(alpha / count);
+        mask[i] = 1;
+      }
+    }
+  }
+  // Empty texels must mip toward neutral normals, not encoded (-1,-1).
+  for (let i = 0; i < mask.length; i++) {
+    if (!mask[i]) {
+      surface[i * 4] = 128;
+      surface[i * 4 + 1] = 128;
+      surface[i * 4 + 2] = 210;
+      surface[i * 4 + 3] = 255;
+    }
+  }
+}
+
 /**
  * Render the species' twig atlas (2×2 variants) and return a mipmapped
  * texture. ~tens of ms once per species; deterministic per seed stream.
@@ -230,7 +342,9 @@ export async function captureFoliageAtlas(
   for (let v = 0; v < 4; v++) {
     buildTwigTile(g, sp, rng.fork(`tile${v}`), (v % 2) - 0.5, Math.floor(v / 2) - 0.5);
   }
-  const mesh = new Mesh(g.build(), captureMaterial(sp, season));
+  const albedoMat = captureMaterial(sp, season);
+  const surfaceMat = captureMaterial(sp, season, true);
+  const mesh = new Mesh(g.build(), albedoMat);
   mesh.frustumCulled = false;
   scene.add(mesh);
 
@@ -243,29 +357,37 @@ export async function captureFoliageAtlas(
 
   const prevTarget = renderer.getRenderTarget();
   const prevClearAlpha = renderer.getClearAlpha();
-  renderer.setClearColor(0x000000, 0);
-  renderer.setRenderTarget(rt);
-  renderer.render(scene, cam);
-  renderer.setRenderTarget(prevTarget);
-  renderer.setClearAlpha(prevClearAlpha);
-
-  const raw = (await renderer.readRenderTargetPixelsAsync(
-    rt,
-    0, 0, ATLAS_RES, ATLAS_RES,
-  )) as Uint8Array;
-  const px = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
-  flipRows(px, ATLAS_RES, ATLAS_RES);
-  dilate(px, ATLAS_RES, 6);
-  rt.dispose();
-
-  const tex = new DataTexture(px, ATLAS_RES, ATLAS_RES);
-  tex.colorSpace = NoColorSpace;
-  tex.generateMipmaps = true;
-  tex.minFilter = LinearMipmapLinearFilter;
-  tex.magFilter = LinearFilter;
-  tex.anisotropy = 4;
-  tex.needsUpdate = true;
-  return tex;
+  // Renderer types request its private Color4 target; alpha is saved above,
+  // so the public Color.copy contract is sufficient and avoids a private import.
+  const prevClearColor = renderer.getClearColor(new Color() as Parameters<Renderer['getClearColor']>[0]);
+  const capture = async (material: MeshStandardNodeMaterial): Promise<Uint8Array> => {
+    mesh.material = material;
+    renderer.setClearColor(0x000000, 0);
+    renderer.setRenderTarget(rt);
+    renderer.render(scene, cam);
+    const raw = await renderer.readRenderTargetPixelsAsync(rt, 0, 0, ATLAS_RES, ATLAS_RES);
+    // WebGPU readback already returns an owned copy of the mapped buffer.
+    // Reuse it instead of allocating another full-size atlas per pass.
+    const px = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+    flipRows(px, ATLAS_RES, ATLAS_RES);
+    return px;
+  };
+  try {
+    // Same geometry, same depth/layout and leaf-retention predicate: no RNG
+    // is consumed between the two passes and silhouette identity is exact.
+    const px = await capture(albedoMat);
+    const surface = await capture(surfaceMat);
+    dilateFoliageSurface(surface, px, ATLAS_RES);
+    dilate(px, ATLAS_RES, 6);
+    return createFoliageAtlasTextures(px, surface, ATLAS_RES, season);
+  } finally {
+    renderer.setRenderTarget(prevTarget);
+    renderer.setClearColor(prevClearColor, prevClearAlpha);
+    rt.dispose();
+    mesh.geometry.dispose();
+    albedoMat.dispose();
+    surfaceMat.dispose();
+  }
 }
 
 /**

@@ -24,6 +24,7 @@ import {
   texture,
   uv,
   varying,
+  vec2,
   vec3,
 } from 'three/tsl';
 import { fbm3, valueNoise3 } from '../gpu/noise/NoiseTSL';
@@ -32,6 +33,7 @@ import { applyCaustics } from './Caustics';
 import { runiform } from '../gpu/RenderUniform';
 import type { BarkPbrProfile, LeafPbrProfile } from '../vegetation/VegetationProfiles';
 import type { SeasonalFoliageStyle } from '../vegetation/Seasons';
+import { foliageAtlasAppearance } from '../vegetation/FoliageCards';
 
 /**
  * Shared sun uniforms for the foliage translucency term (D-2). Updated by
@@ -447,16 +449,26 @@ export function foliageCardMaterial(
   p: FoliageMatParams,
   surface?: LeafPbrProfile,
 ): MeshStandardNodeMaterial {
-  // see foliageMaterial: cards are worse — ONE flat normal per card means
-  // the sheen paints whole cards silver coherently. Near-diffuse.
   const mat = new MeshPhysicalNodeMaterial();
   const pbr = surface;
-  mat.specularIntensity = Math.min(0.22, pbr?.specularIntensity ?? 0.18);
-  mat.clearcoat = Math.min(0.018, pbr?.clearcoat ?? 0);
+  const appearance = foliageAtlasAppearance(atlas);
+  // Legacy RGBA-only atlases keep the original diffuse-safe response.
+  mat.specularIntensity = Math.min(appearance ? 0.3 : 0.22, pbr?.specularIntensity ?? 0.18);
+  mat.clearcoat = Math.min(appearance ? 0.035 : 0.018, pbr?.clearcoat ?? 0);
   mat.clearcoatRoughness = pbr?.clearcoatRoughness ?? 0.8;
   const d = vdata();
   const t = texture(atlas, uv() as never) as unknown as NV4;
   const albedo = t.rgb.mul(t.rgb); // sqrt-encoded at capture
+  if (appearance) {
+    const packed = texture(appearance.surface, uv() as never) as unknown as NV4;
+    const xy = packed.xy.mul(2).sub(1);
+    const nz = float(1).sub(xy.dot(xy)).max(0.02).sqrt();
+    // Preserve the captured leaf-to-leaf normal changes. A bounded tilt
+    // avoids grazing needles turning into glitter; no extra mesh leaves.
+    mat.normalNode = normalMap(vec3(packed.xy, nz.mul(0.5).add(0.5)), vec2(0.68));
+    mat.roughnessNode = packed.z.clamp(0.62, 0.96);
+    mat.aoNode = packed.w.mul(0.18).add(0.82);
+  }
   // vertex-stage hoist (Phase 7 perf): hueShift is LINEAR in its base color
   // (per-channel factor) and vdata is flat per card — fold hue + age into
   // one varying factor and multiply the atlas read by it per fragment.
@@ -469,7 +481,13 @@ export function foliageCardMaterial(
   mat.colorNode = albedo.mul(tintF);
   mat.emissiveNode = albedo.mul(
     varying(
-      translucency(tintF, Math.max(0.045, pbr?.transmission ?? 0.06)) as unknown as Parameters<typeof varying>[0],
+      // Retention is baked into atlas coverage, while transmission follows
+      // the same seasonal profile as real leaves. Local AO tempers the
+      // emissive approximation; this is not a substitute for shadow queries.
+      translucency(
+        tintF,
+        Math.max(0.025, pbr?.transmission ?? 0.045) * (appearance?.season?.transmissionScale ?? 1),
+      ).mul(d.w.mul(0.5).add(0.5)) as unknown as Parameters<typeof varying>[0],
     ) as unknown as NV3,
   );
   // edge-on fade: a card whose plane is parallel to the view ray shows as a
@@ -489,9 +507,7 @@ export function foliageCardMaterial(
   ) as unknown as NF;
   mat.opacityNode = t.w.mul(edgeFade);
   mat.alphaTest = 0.32;
-  // near-diffuse: one flat normal per card means any real specular paints
-  // the WHOLE card with a uniform silver sheen at glancing sun angles —
-  // big cards then read as slate slabs (user: "sun lights some leaves up")
+  // RGBA-only callers have no surface atlas and retain near-diffuse shading.
   mat.roughness = 0.92;
   mat.metalness = 0;
   mat.side = DoubleSide;

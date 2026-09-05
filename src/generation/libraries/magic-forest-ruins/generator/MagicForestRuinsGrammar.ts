@@ -1,5 +1,5 @@
 import type { SegmentObstacle } from '../../../../core/Collision';
-import { Rng as SeededRng, type Rng } from '../../../../core/Seed';
+import { hashCombine, hashString, Rng as SeededRng, type Rng } from '../../../../core/Seed';
 import type { TerrainSurface } from '../../../core/WorldFeature';
 import type {
   CrystalPlacement,
@@ -34,12 +34,14 @@ class SiteAssembler implements MagicRuinsSiteAssembly {
   readonly portals: PortalAnchor[] = [];
   readonly obstacles: SegmentObstacle[] = [];
   readonly rng: Rng;
+  private readonly dressingRng: Rng;
 
   constructor(
     readonly site: MagicRuinsSitePlan,
     readonly terrain: TerrainSurface,
   ) {
     this.rng = new SeededRng(site.ruinSeed);
+    this.dressingRng = new SeededRng(hashCombine(site.ruinSeed, hashString('ruins/dressing-v2')));
   }
 
   private toWorld(localX: number, localZ: number): [number, number] {
@@ -133,16 +135,18 @@ class SiteAssembler implements MagicRuinsSiteAssembly {
       id: `${this.site.id}:pillar-${this.obstacles.length}`,
       a: [worldX, worldZ],
       b: [worldX, worldZ],
-      radius: 0.68,
+      radius: 0.84,
     });
     const courses = Math.max(2, Math.floor(height / 0.82));
+    const ground = this.groundAt(x, z);
+    this.block(x, ground + 0.15, z, 1.62, 0.38, 1.62);
     for (let course = 0; course < courses; course++) {
-      if (course > 2 && this.rng.chance(brokenness + course * 0.035)) break;
+      if (brokenness > 0 && course > 2 && this.rng.chance(brokenness + course * 0.035)) break;
       const taper = 1 - (course / courses) * 0.16;
       const sy = this.rng.range(0.7, 0.88);
       this.block(
         x + this.rng.range(-0.05, 0.05),
-        this.groundAt(x, z) + sy * 0.5 + course * 0.79,
+        ground + sy * 0.5 + course * 0.79 + 0.24,
         z + this.rng.range(-0.05, 0.05),
         this.rng.range(1.0, 1.24) * taper,
         sy,
@@ -153,32 +157,69 @@ class SiteAssembler implements MagicRuinsSiteAssembly {
     }
   }
 
-  rubble(x: number, z: number, count: number, spread: number): void {
+  /** Keep a readable processional axis and empty ritual center in every site. */
+  private dressingAllowed(x: number, z: number): boolean {
+    return Math.hypot(x, z) > 4.8 && !(z > -2 && Math.abs(x) < 3.6);
+  }
+
+  arch(x: number, z: number, radius: number, springHeight: number): void {
+    const ground = this.groundAt(x, z);
+    const segments = 13;
+    for (let i = 0; i < segments; i++) {
+      const angle = (i + 0.5) / segments * Math.PI;
+      this.blocks.push({
+        position: [x + Math.cos(angle) * radius, ground + springHeight + Math.sin(angle) * radius, z],
+        rotation: [0, 0, angle + Math.PI * 0.5],
+        scale: [Math.PI * radius / segments * 0.94, 0.82, 1.3],
+      });
+    }
+  }
+
+  rubble(count: number): void {
+    const rng = this.dressingRng;
+    const wallFootings = this.blocks.filter((block) =>
+      block.position[1] < this.groundAt(block.position[0], block.position[2]) + 0.8);
     for (let i = 0; i < count; i++) {
-      const angle = this.rng.range(0, Math.PI * 2);
-      const radius = Math.sqrt(this.rng.float()) * spread;
-      const px = x + Math.cos(angle) * radius;
-      const pz = z + Math.sin(angle) * radius;
-      const scale = this.rng.range(0.35, 1.0);
-      this.block(
-        px,
-        this.groundAt(px, pz) + scale * 0.22,
-        pz,
-        scale * this.rng.range(0.8, 1.5),
-        scale * this.rng.range(0.35, 0.7),
-        scale * this.rng.range(0.65, 1.2),
-        this.rng.range(-Math.PI, Math.PI),
-        0.28,
-      );
+      // Debris comes from nearby collapsed masonry, not uniform noise over
+      // the whole sanctuary. Keep the existing instanced stone draw call.
+      const footing = rng.pick(wallFootings);
+      const angle = rng.range(0, Math.PI * 2);
+      const radius = rng.range(0.8, 3.2);
+      const px = footing.position[0] + Math.cos(angle) * radius;
+      const pz = footing.position[2] + Math.sin(angle) * radius;
+      if (!this.dressingAllowed(px, pz)) continue;
+      const scale = rng.range(0.22, 0.8);
+      this.blocks.push({
+        position: [px, this.groundAt(px, pz) + scale * 0.16, pz],
+        rotation: [rng.range(-0.28, 0.28), rng.range(-Math.PI, Math.PI), rng.range(-0.28, 0.28)],
+        scale: [scale * rng.range(0.8, 1.5), scale * rng.range(0.35, 0.7), scale * rng.range(0.65, 1.2)],
+      });
     }
   }
 
   crystal(x: number, z: number, scale: number): void {
     this.crystals.push({
       position: [x, this.groundAt(x, z) + scale * 0.9, z],
-      rotation: [this.rng.range(-0.16, 0.16), this.rng.range(-Math.PI, Math.PI), 0],
+      rotation: [this.dressingRng.range(-0.16, 0.16), this.dressingRng.range(-Math.PI, Math.PI), 0],
       scale,
     });
+  }
+
+  crystalClusters(clusters: number, radius: number, scale: number): void {
+    const rng = this.dressingRng;
+    for (let cluster = 0; cluster < clusters; cluster++) {
+      // Leave the entrance quadrant open; groups frame the portal instead of
+      // becoming equally spaced lone luminous cones throughout the clearing.
+      const angle = (cluster + 0.25) / clusters * Math.PI * 2 + rng.range(-0.16, 0.16);
+      let cx = Math.cos(angle) * radius;
+      const cz = Math.sin(angle) * radius;
+      if (cz > -2 && Math.abs(cx) < 5) cx = cx < 0 ? -5 : 5;
+      for (let member = 0; member < 3; member++) {
+        const x = cx + rng.range(-0.8, 0.8);
+        const z = cz + rng.range(-0.8, 0.8);
+        if (this.dressingAllowed(x, z)) this.crystal(x, z, scale * (member === 0 ? 1 : rng.range(0.32, 0.58)));
+      }
+    }
   }
 }
 
@@ -205,37 +246,17 @@ function buildSanctuary(assembler: SiteAssembler): void {
     const angle = (i / 7) * Math.PI * 2 + 0.35;
     assembler.pillar(Math.cos(angle) * 11, Math.sin(angle) * 11, 5.5, 0.14);
   }
-  assembler.pillar(-3.5, -1.2, 7.8, 0.03);
-  assembler.pillar(3.5, -1.2, 7.8, 0.03);
-  for (let i = -2; i <= 2; i++) {
-    if (i === 2 && assembler.rng.chance(0.45)) continue;
-    assembler.block(
-      i * 1.45,
-      7.0 + assembler.groundAt(i * 1.45, -1.2),
-      -1.2,
-      1.42,
-      0.82,
-      1.25,
-      0,
-      0.02,
-    );
-  }
+  assembler.pillar(-3.65, -1.2, 3.6, 0);
+  assembler.pillar(3.65, -1.2, 3.6, 0);
+  assembler.arch(0, -1.2, 3.65, 3.48);
   assembler.portals.push({
     x: 0,
     y: assembler.groundAt(0, -1.05) + 3.6,
     z: -1.05,
     scale: 1,
   });
-  assembler.rubble(0, 0, 55, 29);
-  for (let i = 0; i < 18; i++) {
-    const angle = assembler.rng.range(0, Math.PI * 2);
-    const r = assembler.rng.range(5, 21);
-    assembler.crystal(
-      Math.cos(angle) * r,
-      Math.sin(angle) * r,
-      assembler.rng.range(0.45, 1.35),
-    );
-  }
+  assembler.rubble(55);
+  assembler.crystalClusters(6, 16, 1.15);
 }
 
 function buildWatchCircle(assembler: SiteAssembler): void {
@@ -260,16 +281,8 @@ function buildWatchCircle(assembler: SiteAssembler): void {
       );
     }
   }
-  assembler.rubble(0, 0, 38, 21);
-  for (let i = 0; i < 10; i++) {
-    const angle = assembler.rng.range(0, Math.PI * 2);
-    const r = assembler.rng.range(3, 14);
-    assembler.crystal(
-      Math.cos(angle) * r,
-      Math.sin(angle) * r,
-      assembler.rng.range(0.35, 0.9),
-    );
-  }
+  assembler.rubble(38);
+  assembler.crystalClusters(4, 10, 0.8);
 }
 
 function buildForestShrine(assembler: SiteAssembler): void {
@@ -284,16 +297,8 @@ function buildForestShrine(assembler: SiteAssembler): void {
     z: -1,
     scale: 0.72,
   });
-  assembler.rubble(0, 0, 34, 17);
-  for (let i = 0; i < 12; i++) {
-    const angle = assembler.rng.range(0, Math.PI * 2);
-    const r = assembler.rng.range(2, 13);
-    assembler.crystal(
-      Math.cos(angle) * r,
-      Math.sin(angle) * r,
-      assembler.rng.range(0.3, 0.85),
-    );
-  }
+  assembler.rubble(34);
+  assembler.crystalClusters(4, 8, 0.78);
 }
 
 export function assembleMagicRuinsSite(

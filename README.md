@@ -14,6 +14,37 @@ three.js `WebGPURenderer`、TSL 和原生 WGSL compute 为基础，通过可复�
 
 ## 已有场景
 
+### 品质样板与本轮升级
+
+推荐先打开 **魔法森林河谷**：
+
+```text
+http://127.0.0.1:5173/?showcase=enchanted-river&preset=low
+```
+
+`showcase` 是纯数据组合，复用原有地形、生态和内容库，不创建另一套生成器。
+显式 URL 参数始终覆盖样板默认值，例如追加 `&season=autumn` 或 `&seed=17`。
+
+| 样板 | 组合 |
+|---|---|
+| `enchanted-river` | 折叠山脉、野生林地、湿岸与魔法遗迹；入口会检查地形视线。 |
+| `autumn-river` | 相同地形种子的秋日荒野，不叠加遗迹或城市。 |
+| `oasis-sanctuary` | 沙丘绿洲；干旱区以仙人掌/裸地为主，树木偏向湿润区域。 |
+
+本轮品质改进：
+
+- 叶簇增加法线、粗糙度和 AO 贴图，中近景不再仅依赖整片卡片法线；不增加树木实体叶面数。
+- 远景森林使用物种与季节的代表群落色板；冬季落叶树不提交空树冠。
+- 石材增加凹凸、风化倒角与实例色差；地衣细分贴地并自然裁切边缘；水晶和符文门保留结构与颜色。
+- 生境控制和物种权重独立为 `HabitatModel`；接受概率与最终植物抽样一致，草地采用多尺度世界空间斑块。
+- 树木、水岸和地表湿润读取局部水位；湿地由湿度、温度和坡度判断，不绑定原来的固定湖面海拔。
+- 野生林地使用独立的风化岩面色板，减少山坡泛白；远景积雪也遵守 `exclude=snow`。
+- Hero 树木按距离与稳定实例身份选择；超过每变体 5 棵预算时完整回退到 Near。近景阴影独立于 Hero 名额。
+
+运行 `npm run test:quality` 可单独验证本轮品质合同。实现边界、验收方法和扩展要求见
+[场景品质与生成标准](docs/SCENE-QUALITY.md)。**本轮生态规则升级会改变旧 seed 的植被分布**；
+同一版本、同一完整配置仍可复现，跨版本精确复现需要同时保留 Git commit 和 URL。
+
 ### 程序化荒野 `wilderness`
 
 基础地形、水文、生态、光照、大气、水体和探索系统，不叠加人工遗迹。
@@ -271,6 +302,7 @@ http://127.0.0.1:5173/?world=fantasy-city&terrain=laas&seed=84&preset=low
 | 参数 | 示例 | 说明 |
 |---|---|---|
 | `seed` | `42` | 世界主种子。 |
+| `showcase` | `enchanted-river` | 可选的场景组合默认值；显式参数覆盖它。 |
 | `terrain` | `folded-ranges` | 地形配方。 |
 | `landscape` | `balanced` / `wild` / `settled` / `paved` / `arid` / `alpine` / `oasis` / `coastal` / `moorland` / `legacy` | 地貌、生态和地表预设。 |
 | `include` | `plains,forest,flowers,cobble` | 强制启用的景观标签，逗号分隔。 |
@@ -305,7 +337,7 @@ npm run preview
 ```
 
 - `npm run build` 先运行严格 TypeScript 检查，再生成 `dist/`。
-- `npm run preview` 在 `http://localhost:5174` 预览生产构建。
+- `npm run preview` 在 `http://localhost:5174/codex-world-factory/` 预览生产构建，预览路径与生产资源路径保持一致。
 - 生产站点必须通过 HTTPS 提供，localhost 开发环境除外；WebGPU 需要安全上下文。
 
 ### 静态托管

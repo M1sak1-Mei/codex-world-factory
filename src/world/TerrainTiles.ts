@@ -205,6 +205,7 @@ export class TerrainTiles {
     );
 
     const shading = buildTerrainShading({
+      localWaterY: hf.sampleWaterYNearest(positionWorld.xz),
       normalTex: hf.normalTex,
       biomeTex: hf.biomeTex as NonNullable<typeof hf.biomeTex>,
       fieldsTex: hf.fieldsTex as NonNullable<typeof hf.fieldsTex>,
@@ -394,6 +395,7 @@ export class TerrainTiles {
       .div(eN);
     const farNS = varying(vec4(farNormal, farSlope));
     const farShading = buildTerrainShading({
+      localWaterY: hf.sampleWaterYNearest(positionWorld.xz),
       normalTex: hf.normalTex,
       biomeTex: hf.biomeTex as NonNullable<typeof hf.biomeTex>,
       fieldsTex: hf.fieldsTex as NonNullable<typeof hf.fieldsTex>,

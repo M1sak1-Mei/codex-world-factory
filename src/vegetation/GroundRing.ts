@@ -89,6 +89,7 @@ import type { WorldSeed } from '../core/Seed';
 import { runiform } from '../gpu/RenderUniform';
 import type { ScatterExclusionZone } from '../generation/core/WorldFeature';
 import { scatterExclusionMask } from '../generation/integrations/ScatterExclusionTSL';
+import { groundHabitatPatch, habitatAt } from '../gpu/HabitatTSL';
 
 const GRASS_GRID = 3072;
 const GRASS_CELL = 0.105; // m → ±161 m ring, ~90 slots/m²
@@ -471,19 +472,14 @@ export class GroundRing {
       const bank = smoothstep(0.06, 0.5, above).mul(
         float(1).sub(smoothstep(0.2, 1.1, fl.z).mul(0.78)),
       );
-      let dens = byBio(bioId, [0.18, 0.7, 0.62, 0.7, 1.5, 1.1])
+      const dens = byBio(bioId, [0.18, 0.7, 0.62, 0.7, 1.5, 1.1])
         .mul(bank)
         .mul(bio.z.mul(0.85).add(0.15))
         .mul(float(1).sub(bio.w.mul(0.55)))
         .mul(float(1).sub(canopy.mul(0.45)))
-        .mul(fl.x.mul(0.35).add(0.75));
-      // near-field scruff floor: NOTHING within ~12 m may be totally bald
-      // (Pillar A) — thin dry blades survive even on poor soil. Hard gates
-      // (water, snow, steep rock) still apply below.
-      dens = dens.max(
-        float(0.3).mul(float(1).sub(smoothstep(8, 14, dist))).mul(bank),
-      );
-      dens = dens
+        .mul(fl.x.mul(0.35).add(0.75))
+        // Habitat owns bare patches; approaching the camera cannot grow grass.
+        .mul(groundHabitatPatch(hf, wpos, surf.r, fl.x))
         .mul(float(1).sub(bio.y.mul(0.95)))
         .mul(float(1).sub(smoothstep(0.55, 0.95, ns.w)))
         .mul(hf.mp.landscape.ecology.grass)
@@ -585,9 +581,11 @@ export class GroundRing {
         .add(coreK.mul(2.6))
         .mul(0.5);
       const wPebble = bio.w.mul(0.9).add(streamK).add(marginK.mul(1.4)).add(0.15).mul(0.6);
-      const wTwig = canopy.mul(1.8).add(0.12).mul(float(1).sub(streamK)).mul(dry);
-      const wChip = canopy.mul(0.8).mul(float(1).sub(streamK)).mul(dry);
-      const wLitter = canopy.mul(3.0).add(0.08).mul(float(1).sub(streamK.mul(0.8))).mul(dry);
+      const organicHabitat = habitatAt(hf, surf.r, fl.x).woodland
+        .mul(Math.min(1, hf.mp.landscape.ecology.forest));
+      const wTwig = canopy.mul(1.8).add(0.12).mul(float(1).sub(streamK)).mul(dry).mul(organicHabitat);
+      const wChip = canopy.mul(0.8).mul(float(1).sub(streamK)).mul(dry).mul(organicHabitat);
+      const wLitter = canopy.mul(3.0).add(0.08).mul(float(1).sub(streamK.mul(0.8))).mul(dry).mul(organicHabitat);
       const wSum = wCobble.add(wPebble).add(wTwig).add(wChip).add(wLitter);
       // streambeds are FULLY cobbled geometry (spec §9) — override biome density
       const dens = byBio(bioId, [0.4, 0.6, 1.0, 1.0, 0.6, 0.75])
@@ -675,6 +673,7 @@ export class GroundRing {
         .mul(bio.z.mul(0.85).add(0.15))
         .mul(float(1).sub(bio.w.mul(0.55)))
         .mul(float(1).sub(canopy.mul(0.45)))
+        .mul(groundHabitatPatch(hf, wpos, surf.r, fl.x))
         .mul(float(1).sub(bio.y.mul(0.95)))
         .mul(float(1).sub(smoothstep(0.55, 0.95, ns.w)))
         .mul(hf.mp.landscape.ecology.grass)
@@ -973,13 +972,20 @@ export class GroundRing {
     const rz = ls.z.mul(c).sub(ls.x.mul(s));
     const sink = scl.mul(0.22);
     mat.positionNode = Fn(() => {
+      // Rigid tangent-frame alignment keeps twigs/leaf litter on slopes.
+      // No per-vertex heightfield deformation: the asset's shape is preserved.
+      const ground = (texture(this.hf.normalTex, wpos.div(WORLD_SIZE).add(0.5), 0) as unknown as NV4).xyz;
+      const up = vec3(ground.x, ground.y.max(0.4), ground.z).normalize().toVar();
+      const tangent = vec3(up.y, up.x.negate(), 0).normalize().toVar();
+      const bitangent = tangent.cross(up).toVar();
       const n = vec3(
         normalLocal.x.mul(c).add(normalLocal.z.mul(s)),
         normalLocal.y,
         normalLocal.z.mul(c).sub(normalLocal.x.mul(s)),
       ).toVar();
-      normalLocal.assign(n);
-      return vec3(rx.add(wpos.x), ls.y.add(y).sub(sink), rz.add(wpos.y));
+      normalLocal.assign(tangent.mul(n.x).add(up.mul(n.y)).add(bitangent.mul(n.z)));
+      return tangent.mul(rx).add(up.mul(ls.y)).add(bitangent.mul(rz))
+        .add(vec3(wpos.x, y.sub(sink), wpos.y));
     })();
     const dist = wpos.sub(vec2(cameraPosition.x, cameraPosition.z)).length();
     bandFade(mat, dist, null, DEB_R - 6, 5);

@@ -13,6 +13,8 @@ import type { GpuDiagnostics } from './Hooks';
  */
 export const WORLD_MIN_SAMPLED_TEXTURES = 17;
 export const WORLD_REQUESTED_SAMPLED_TEXTURES = 32;
+/** Tree culling includes the stable Hero selection keys and fallback flags. */
+export const WORLD_MIN_STORAGE_BUFFERS = 10;
 
 const INTERESTING_LIMITS: readonly (keyof GPUSupportedLimits & string)[] = [
   'maxTextureDimension2D',
@@ -63,6 +65,10 @@ export function worldGpuLimitFailures(d: GpuDiagnostics): string[] {
     return [
       `maxSampledTexturesPerShaderStage=${sampled} (need ${WORLD_MIN_SAMPLED_TEXTURES})`,
     ];
+  }
+  const storage = d.limits.maxStorageBuffersPerShaderStage;
+  if (storage === undefined || storage < WORLD_MIN_STORAGE_BUFFERS) {
+    return [`maxStorageBuffersPerShaderStage=${storage ?? 'unreported'} (need ${WORLD_MIN_STORAGE_BUFFERS})`];
   }
   return [];
 }

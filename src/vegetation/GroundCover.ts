@@ -163,10 +163,10 @@ export function grassPatch(
 // Debris
 // ---------------------------------------------------------------------------
 
-/** bent twig: 4-sided micro tube, 2 kinks */
+/** Bent twig/branch source: rounded hexagonal section, four short bends. */
 export function twigGeometry(rng: Rng): BufferGeometry {
   const g = new MeshGrower();
-  const segs = 3;
+  const segs = 5;
   const pts: Vector3[] = [];
   const dir = new Vector3(1, 0.08 + rng.float() * 0.1, (rng.float() - 0.5) * 0.4).normalize();
   const p = new Vector3(0, 0.012, 0);
@@ -186,7 +186,7 @@ export function twigGeometry(rng: Rng): BufferGeometry {
   );
   // reuse tube path via a minimal inline branch
   const hue = rng.float() * 2 - 1;
-  const ring = 4;
+  const ring = 6;
   const rings: number[][] = [];
   const N = new Vector3();
   const B = new Vector3();

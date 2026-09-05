@@ -10,6 +10,7 @@
  */
 
 import {
+  Color,
   DataTexture,
   DoubleSide,
   LinearFilter,
@@ -211,88 +212,104 @@ export async function captureImpostor(
   );
 
   const prevTarget = renderer.getRenderTarget();
-  renderer.setClearColor(0x000000, 0);
+  const prevClearAlpha = renderer.getClearAlpha();
+  const prevClearColor = renderer.getClearColor(new Color() as Parameters<Renderer['getClearColor']>[0]);
 
   // build one scene per pass kind (materials differ)
   const passes: PassKind[] = ['albedo', 'normal', 'depth'];
   const scenes = new Map<PassKind, Scene>();
-  for (const pk of passes) {
-    const sc = new Scene();
-    for (const part of parts) {
-      const m = new Mesh(part.geometry, passMaterial(part, pk, camDist, bounds.radius));
-      m.frustumCulled = false;
-      sc.add(m);
+  try {
+    renderer.setClearColor(0x000000, 0);
+    for (const pk of passes) {
+      const sc = new Scene();
+      scenes.set(pk, sc);
+      for (const part of parts) {
+        const m = new Mesh(part.geometry, passMaterial(part, pk, camDist, bounds.radius));
+        m.frustumCulled = false;
+        sc.add(m);
+      }
     }
-    scenes.set(pk, sc);
-  }
 
-  for (let gy = 0; gy < grid; gy++) {
-    for (let gx = 0; gx < grid; gx++) {
-      const dir = hemiOctDecode((gx + 0.5) / grid, (gy + 0.5) / grid);
-      cam.position.copy(center).addScaledVector(dir, camDist);
-      cam.up.set(0, 1, 0);
-      if (Math.abs(dir.y) > 0.985) cam.up.set(0, 0, -1);
-      cam.lookAt(center);
-      cam.updateMatrixWorld();
+    for (let gy = 0; gy < grid; gy++) {
+      for (let gx = 0; gx < grid; gx++) {
+        const dir = hemiOctDecode((gx + 0.5) / grid, (gy + 0.5) / grid);
+        cam.position.copy(center).addScaledVector(dir, camDist);
+        cam.up.set(0, 1, 0);
+        if (Math.abs(dir.y) > 0.985) cam.up.set(0, 0, -1);
+        cam.lookAt(center);
+        cam.updateMatrixWorld();
 
-      const out: Partial<Record<PassKind, Uint8Array>> = {};
-      for (const pk of passes) {
-        renderer.setRenderTarget(rt);
-        renderer.render(scenes.get(pk) as Scene, cam);
-        renderer.setRenderTarget(prevTarget);
-        const raw = (await renderer.readRenderTargetPixelsAsync(rt, 0, 0, tile, tile)) as Uint8Array;
-        const px = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
-        flipRows(px, tile, tile);
-        out[pk] = px;
-      }
-      // compose into atlases: normal.a := depth.r
-      const alb = out.albedo as Uint8Array;
-      const nrm = out.normal as Uint8Array;
-      const dep = out.depth as Uint8Array;
-      // RGB dilation into the empty space (per tile — views must not
-      // bleed into each other): albedo, normals and depth all flood so
-      // edge taps and far mips read leaf color, not clear-black
-      const cover = new Uint8Array(tile * tile);
-      for (let ci = 0; ci < tile * tile; ci++) {
-        cover[ci] = (alb[ci * 4 + 3] as number) > 8 ? 1 : 0;
-      }
-      dilateRgb(alb, cover, tile);
-      dilateRgb(nrm, cover, tile);
-      dilateRgb(dep, cover, tile);
-      for (let py = 0; py < tile; py++) {
-        const dstRow = ((gy * tile + py) * atlasRes + gx * tile) * 4;
-        const srcRow = py * tile * 4;
-        albedoPx.set(alb.subarray(srcRow, srcRow + tile * 4), dstRow);
-        for (let px = 0; px < tile; px++) {
-          const si = srcRow + px * 4;
-          const di = dstRow + px * 4;
-          normalPx[di] = nrm[si] as number;
-          normalPx[di + 1] = nrm[si + 1] as number;
-          normalPx[di + 2] = nrm[si + 2] as number;
-          // alpha: depth where covered, 0 where background
-          normalPx[di + 3] = (alb[si + 3] as number) > 8 ? Math.max(1, dep[si] as number) : 0;
+        const out: Partial<Record<PassKind, Uint8Array>> = {};
+        for (const pk of passes) {
+          renderer.setRenderTarget(rt);
+          renderer.render(scenes.get(pk) as Scene, cam);
+          renderer.setRenderTarget(prevTarget);
+          const raw = (await renderer.readRenderTargetPixelsAsync(rt, 0, 0, tile, tile)) as Uint8Array;
+          const px = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+          flipRows(px, tile, tile);
+          out[pk] = px;
+        }
+        // compose into atlases: normal.a := depth.r
+        const alb = out.albedo as Uint8Array;
+        const nrm = out.normal as Uint8Array;
+        const dep = out.depth as Uint8Array;
+        // RGB dilation into the empty space (per tile — views must not
+        // bleed into each other): albedo, normals and depth all flood so
+        // edge taps and far mips read leaf color, not clear-black
+        const cover = new Uint8Array(tile * tile);
+        for (let ci = 0; ci < tile * tile; ci++) {
+          cover[ci] = (alb[ci * 4 + 3] as number) > 8 ? 1 : 0;
+        }
+        dilateRgb(alb, cover, tile);
+        dilateRgb(nrm, cover, tile);
+        dilateRgb(dep, cover, tile);
+        for (let py = 0; py < tile; py++) {
+          const dstRow = ((gy * tile + py) * atlasRes + gx * tile) * 4;
+          const srcRow = py * tile * 4;
+          albedoPx.set(alb.subarray(srcRow, srcRow + tile * 4), dstRow);
+          for (let px = 0; px < tile; px++) {
+            const si = srcRow + px * 4;
+            const di = dstRow + px * 4;
+            normalPx[di] = nrm[si] as number;
+            normalPx[di + 1] = nrm[si + 1] as number;
+            normalPx[di + 2] = nrm[si + 2] as number;
+            // alpha: depth where covered, 0 where background
+            normalPx[di + 3] = (alb[si + 3] as number) > 8 ? Math.max(1, dep[si] as number) : 0;
+          }
         }
       }
     }
+    const mk = (px: Uint8Array): DataTexture => {
+      const t = new DataTexture(px, atlasRes, atlasRes);
+      t.colorSpace = NoColorSpace;
+      t.generateMipmaps = true;
+      t.minFilter = LinearMipmapLinearFilter;
+      t.magFilter = LinearFilter;
+      t.anisotropy = 4;
+      t.needsUpdate = true;
+      return t;
+    };
+    return {
+      albedo: mk(albedoPx),
+      normalDepth: mk(normalPx),
+      radius: bounds.radius,
+      centerY: bounds.centerY,
+    };
+  } finally {
+    renderer.setRenderTarget(prevTarget);
+    renderer.setClearColor(prevClearColor, prevClearAlpha);
+    rt.dispose();
+    for (const scene of scenes.values()) {
+      for (const child of scene.children) {
+        const material = (child as Mesh).material;
+        if (Array.isArray(material)) material.forEach((part) => part.dispose());
+        else material.dispose();
+      }
+      // Input geometry and textures belong to the caller and may be shared.
+      // Only these per-pass materials and scenes are capture-owned.
+      scene.clear();
+    }
   }
-  rt.dispose();
-
-  const mk = (px: Uint8Array): DataTexture => {
-    const t = new DataTexture(px, atlasRes, atlasRes);
-    t.colorSpace = NoColorSpace;
-    t.generateMipmaps = true;
-    t.minFilter = LinearMipmapLinearFilter;
-    t.magFilter = LinearFilter;
-    t.anisotropy = 4;
-    t.needsUpdate = true;
-    return t;
-  };
-  return {
-    albedo: mk(albedoPx),
-    normalDepth: mk(normalPx),
-    radius: bounds.radius,
-    centerY: bounds.centerY,
-  };
 }
 
 /**

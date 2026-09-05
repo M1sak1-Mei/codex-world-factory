@@ -6,7 +6,7 @@
 
 import { ACESFilmicToneMapping, PerspectiveCamera, Scene } from 'three';
 import { TimestampQuery, WebGPURenderer } from 'three/webgpu';
-import { buildRequiredLimits, WORLD_MIN_SAMPLED_TEXTURES } from './Diagnostics';
+import { buildRequiredLimits, WORLD_MIN_SAMPLED_TEXTURES, WORLD_MIN_STORAGE_BUFFERS } from './Diagnostics';
 import { installMaterialKeyMemo } from '../render/ThreePatches';
 import { installPositionInvariance } from '../render/VegPrepass';
 import { GpuProfiler } from './GpuProfiler';
@@ -79,6 +79,9 @@ export class Engine {
     // fail-loud: surface WebGPU validation errors (otherwise: silent black frames)
     const device = (renderer.backend as unknown as { device?: GPUDevice }).device;
     if (device) {
+      if (device.limits.maxStorageBuffersPerShaderStage < WORLD_MIN_STORAGE_BUFFERS) {
+        throw new Error(`World vegetation requires ${WORLD_MIN_STORAGE_BUFFERS} storage buffers per shader stage`);
+      }
       const sampledTextureLimit = device.limits.maxSampledTexturesPerShaderStage;
       if (sampledTextureLimit < WORLD_MIN_SAMPLED_TEXTURES) {
         throw new Error(

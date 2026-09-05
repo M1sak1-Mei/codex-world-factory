@@ -4,6 +4,7 @@ import {
   buildRequiredLimits,
   WORLD_MIN_SAMPLED_TEXTURES,
   WORLD_REQUESTED_SAMPLED_TEXTURES,
+  WORLD_MIN_STORAGE_BUFFERS,
   worldGpuLimitFailures,
 } from '../src/core/Diagnostics';
 import type { GpuDiagnostics } from '../src/core/Hooks';
@@ -28,6 +29,16 @@ test('renderer explicitly requests sampled-texture headroom', () => {
     limits.maxSampledTexturesPerShaderStage,
     WORLD_REQUESTED_SAMPLED_TEXTURES,
   );
+});
+
+test('startup diagnoses insufficient tree-culling storage bindings before generation', () => {
+  const d = diagnostics(32);
+  d.limits.maxStorageBuffersPerShaderStage = WORLD_MIN_STORAGE_BUFFERS;
+  assert.deepEqual(worldGpuLimitFailures(d), []);
+  d.limits.maxStorageBuffersPerShaderStage = WORLD_MIN_STORAGE_BUFFERS - 1;
+  assert.match(worldGpuLimitFailures(d)[0] ?? '', /maxStorageBuffersPerShaderStage/);
+  delete d.limits.maxStorageBuffersPerShaderStage;
+  assert.match(worldGpuLimitFailures(d)[0] ?? '', /unreported/);
 });
 
 test('sampled-texture request is clamped to the adapter limit', () => {

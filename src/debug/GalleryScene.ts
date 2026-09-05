@@ -49,6 +49,7 @@ import {
 } from '../vegetation/GroundCover';
 import { buildRock, type RockPreset } from '../vegetation/RockBuilder';
 import { TREE_SPECIES } from '../vegetation/Species';
+import { seasonalFoliageStyle } from '../vegetation/Seasons';
 import { buildTree } from '../vegetation/TreeBuilder';
 import {
   barkProfileForTier,
@@ -170,7 +171,7 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
     if (!sp.foliage) continue;
     atlases.set(
       sp.id,
-      await captureFoliageAtlas(engine.renderer, sp, seed.rng(`cards/${sp.id}`)),
+      await captureFoliageAtlas(engine.renderer, sp, seed.rng(`cards/${sp.id}`), seasonalFoliageStyle(sp, params.season)),
     );
   }
 
@@ -237,7 +238,7 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
       barkMesh.receiveShadow = true;
       engine.scene.add(barkMesh);
       const atlas = atlases.get(sp.id);
-      if (built.foliage && atlas) {
+      if (built.foliage && atlas && seasonalFoliageStyle(sp, params.season).coverage > 0) {
         const folMesh = new Mesh(
           built.foliage,
           foliageCardMaterial(atlas, { color: sp.foliageColor }, surface.leaf),
@@ -555,7 +556,7 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
       ];
       for (const variant of variants) {
         const built = buildTree(sp, seed.rng('hero/oak-comparison'), {
-          foliageMode: 'hybrid',
+          foliageMode: seasonalFoliageStyle(sp, params.season).coverage > 0 ? 'hybrid' : 'cards',
           heroSurface: variant.enhanced,
           hero: { cardTarget: 1800, meshAnchorTarget: 320, barkK: 0.8 },
         });
@@ -577,7 +578,7 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
       bm.receiveShadow = true;
       engine.scene.add(bm);
       const heroAtlas = atlases.get(sp.id);
-      if (built.foliage && heroAtlas) {
+      if (built.foliage && heroAtlas && seasonalFoliageStyle(sp, params.season).coverage > 0) {
           const fm = new Mesh(
             built.foliage,
             foliageCardMaterial(
@@ -597,6 +598,7 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
             foliageMaterial(
               { color: sp.foliageColor },
               variant.enhanced ? surface.leaf : undefined,
+              seasonalFoliageStyle(sp, params.season),
             ),
           );
         fm2.position.copy(bm.position);

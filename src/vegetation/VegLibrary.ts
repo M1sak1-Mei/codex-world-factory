@@ -201,7 +201,7 @@ export async function buildVegLibrary(
       },
     ];
     const atlas = atlases.get(sp.id);
-    if (t.foliage && atlas) {
+    if (t.foliage && atlas && seasonalFoliageStyle(sp, season).coverage > 0) {
       parts.push({
         geo: t.foliage,
         tris: t.foliage.index ? t.foliage.index.count / 3 : 0,
@@ -227,7 +227,7 @@ export async function buildVegLibrary(
       const t0 = buildTree(sp, seed.rng(label), {
         lod: 0,
         inst,
-        foliageMode: 'hybrid',
+        foliageMode: seasonalFoliageStyle(sp, season).coverage > 0 ? 'hybrid' : 'cards',
         hero: HERO_DIETS[sp.id] ?? { cardTarget: 1500, meshAnchorTarget: 1200 },
       });
       const t1 = buildTree(sp, seed.rng(label), { lod: 1, inst });
@@ -258,8 +258,8 @@ export async function buildVegLibrary(
         r0,
         r1,
         r2,
-        trisR1: t1.stats.tris,
-        trisR2: t2.stats.tris,
+        trisR1: r1.reduce((sum, part) => sum + part.tris, 0),
+        trisR2: r2.reduce((sum, part) => sum + part.tris, 0),
         height: b.height,
         radius: b.radius,
       });
@@ -281,16 +281,26 @@ export async function buildVegLibrary(
       { geometry: t.bark, kind: 'bark', barkTex: barkOf(sp.barkLayer) },
     ];
     const atlas = atlases.get(sp.id);
-    if (t.foliage && atlas) parts.push({ geometry: t.foliage, kind: 'cards', atlas });
+    if (t.foliage && atlas && seasonalFoliageStyle(sp, season).coverage > 0) {
+      parts.push({ geometry: t.foliage, kind: 'cards', atlas });
+    }
     const radius = Math.max(
       t.stats.height * 0.55,
       t.skeleton.crownRadius * 1.4,
       2,
     );
-    impostors.set(
-      ci,
-      await captureImpostor(renderer, parts, { centerY: t.stats.height * 0.5, radius }),
-    );
+    try {
+      impostors.set(
+        ci,
+        await captureImpostor(renderer, parts, { centerY: t.stats.height * 0.5, radius }),
+      );
+    } finally {
+      // This tree was built solely for capture; pool R0/R1/R2 geometries
+      // were built separately above. Shared bark/foliage textures stay live.
+      t.bark.dispose();
+      t.foliage?.dispose();
+      t.foliageMesh?.dispose();
+    }
     progress(0.56 + 0.18 * ((ci + 1) / TREE_SPECIES.length), `veg: impostor ${sp.id}`);
   }
 

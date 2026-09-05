@@ -256,7 +256,7 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
 
     // far forests: aggregate canopy shell beyond the impostor mid-band
     if (!ablate.has('shell')) {
-      engine.scene.add(buildCanopyShell(hf, canopyTex));
+      engine.scene.add(buildCanopyShell(hf, canopyTex, params.season));
     }
   }
 

@@ -13,6 +13,7 @@ import {
   type WorldRecipeId,
 } from '../generation/core/WorldRecipe';
 import { parseSeasonId, type SeasonId } from '../vegetation/Seasons';
+import { resolveShowcaseParameters } from '../world/WorldShowcase';
 
 export type QualityPreset = 'low' | 'high' | 'ultra';
 
@@ -56,7 +57,7 @@ function num(v: string | null, fallback: number): number {
 }
 
 export function parseParams(search: string = window.location.search): LaasParams {
-  const q = new URLSearchParams(search);
+  const q = resolveShowcaseParameters(search);
   const presetRaw = q.get('preset') ?? 'high';
   const preset: QualityPreset =
     presetRaw === 'low' || presetRaw === 'ultra' ? presetRaw : 'high';
