@@ -18,6 +18,7 @@ import { bakeBarkTextures, type BarkTextures } from '../gpu/passes/BarkSynth';
 import { TREE_VARIANTS, VegClass } from '../gpu/passes/Scatter';
 import {
   barkTexturedMaterial,
+  cactusMaterial,
   deadwoodMaterial,
   flowerMaterial,
   foliageCardMaterial,
@@ -25,11 +26,17 @@ import {
   rockMaterial,
 } from '../render/VegMaterials';
 import { buildLog, buildStump, type DecayState } from './Deadfall';
+import { buildCactus } from './AridPlants';
 import { captureFoliageAtlas } from './FoliageCards';
 import { twigGeometry } from './GroundCover';
 import { captureImpostor, type ImpostorAtlas, type ImpostorPart } from './Impostors';
 import { buildRock } from './RockBuilder';
 import { TREE_SPECIES } from './Species';
+import {
+  seasonalFoliageStyle,
+  treeSeasonCoverages,
+  type SeasonId,
+} from './Seasons';
 import { buildTree, type HeroDiet } from './TreeBuilder';
 import {
   buildFern,
@@ -40,6 +47,11 @@ import {
   type FlowerKind,
 } from './Understory';
 import type { GrowthInstance, SpeciesParams } from './VegTypes';
+import {
+  barkProfileForTier,
+  vegetationSurfaceProfile,
+  type VegetationRenderTier,
+} from './VegetationProfiles';
 
 export interface PoolPart {
   geo: BufferGeometry;
@@ -72,14 +84,14 @@ export const HERO_DIETS: Record<string, HeroDiet> = {
   // cards stay UNTHINNED at hero range: thinning enlarges the survivors
   // (sqrt-coverage rule) and a 1.65×-size card 4 m away is a giant flat
   // sheet — full-count original-size cards + mesh leaves is the gallery look
-  spruce: { meshAnchorTarget: 850, barkK: 0.8 },
-  pine: { meshAnchorTarget: 350, barkK: 0.8 },
-  beech: { meshAnchorTarget: 2200, barkK: 0.5 },
-  birch: { meshAnchorTarget: 4000, barkK: 1 },
-  karst: { meshAnchorTarget: 4000, barkK: 1.1 },
+  spruce: { meshAnchorTarget: 220, barkK: 0.8 },
+  pine: { meshAnchorTarget: 120, barkK: 0.8 },
+  beech: { meshAnchorTarget: 260, barkK: 0.5 },
+  birch: { meshAnchorTarget: 300, barkK: 1 },
+  karst: { meshAnchorTarget: 220, barkK: 1.1 },
   snag: { barkK: 1.3 },
-  oak: { meshAnchorTarget: 2200, barkK: 0.55 },
-  willow: { meshAnchorTarget: 3200, barkK: 0.9 },
+  oak: { meshAnchorTarget: 320, barkK: 0.55 },
+  willow: { meshAnchorTarget: 280, barkK: 0.9 },
 };
 
 export interface VegLib {
@@ -92,6 +104,8 @@ export interface VegLib {
   clsMaxDist: number[];
   atlases: Map<string, DataTexture>;
   barks: Map<number, BarkTextures>;
+  /** tree-class ordered seasonal leaf retention for canopy/shadow proxies */
+  treeCoverage: number[];
 }
 
 const FLOWER_COLOR: Record<FlowerKind, { r: number; g: number; b: number }> = {
@@ -129,13 +143,22 @@ export async function buildVegLibrary(
   renderer: Renderer,
   seed: WorldSeed,
   progress: (p: number, msg: string) => void = () => {},
+  season: SeasonId = 'summer',
 ): Promise<VegLib> {
   // ---- shared captures -------------------------------------------------------
   progress(0, 'veg: capturing foliage atlases');
   const atlases = new Map<string, DataTexture>();
   for (const sp of [...TREE_SPECIES, ...UNDERSTORY_SPECIES, FERN_CAPTURE]) {
     if (!sp.foliage || atlases.has(sp.id)) continue;
-    atlases.set(sp.id, await captureFoliageAtlas(renderer, sp, seed.rng(`cards/${sp.id}`)));
+    atlases.set(
+      sp.id,
+      await captureFoliageAtlas(
+        renderer,
+        sp,
+        seed.rng(`cards/${sp.id}`),
+        seasonalFoliageStyle(sp, season),
+      ),
+    );
   }
   progress(0.2, 'veg: baking bark textures');
   const barks = new Map<number, BarkTextures>();
@@ -160,21 +183,33 @@ export async function buildVegLibrary(
 
   // ---- trees: 6 species × 4 variants × (R1 cards, R2 branch-cards) ----------
   progress(0.3, 'veg: growing tree variant pools');
-  const treeParts = (sp: SpeciesParams, t: ReturnType<typeof buildTree>): PoolPart[] => {
+  const treeParts = (
+    sp: SpeciesParams,
+    t: ReturnType<typeof buildTree>,
+    tier: VegetationRenderTier,
+  ): PoolPart[] => {
+    const surface = vegetationSurfaceProfile(sp.id);
     const parts: PoolPart[] = [
       {
         geo: t.bark,
         tris: t.bark.index ? t.bark.index.count / 3 : 0,
-        make: () => barkTexturedMaterial(barkOf(sp.barkLayer)),
+        make: () => barkTexturedMaterial(
+          barkOf(sp.barkLayer),
+          barkProfileForTier(surface, tier),
+        ),
         castShadow: true,
       },
     ];
     const atlas = atlases.get(sp.id);
-    if (t.foliage && atlas) {
+    if (t.foliage && atlas && seasonalFoliageStyle(sp, season).coverage > 0) {
       parts.push({
         geo: t.foliage,
         tris: t.foliage.index ? t.foliage.index.count / 3 : 0,
-        make: () => foliageCardMaterial(atlas, { color: sp.foliageColor }),
+        make: () => foliageCardMaterial(
+          atlas,
+          { color: sp.foliageColor },
+          surface.leaf,
+        ),
         castShadow: true,
       });
     }
@@ -192,24 +227,29 @@ export async function buildVegLibrary(
       const t0 = buildTree(sp, seed.rng(label), {
         lod: 0,
         inst,
-        foliageMode: 'hybrid',
+        foliageMode: seasonalFoliageStyle(sp, season).coverage > 0 ? 'hybrid' : 'cards',
         hero: HERO_DIETS[sp.id] ?? { cardTarget: 1500, meshAnchorTarget: 1200 },
       });
       const t1 = buildTree(sp, seed.rng(label), { lod: 1, inst });
       const t2 = buildTree(sp, seed.rng(label), { lod: 2, inst });
-      const r0 = treeParts(sp, t0);
+      const surface = vegetationSurfaceProfile(sp.id);
+      const r0 = treeParts(sp, t0, 'hero');
       if (t0.foliageMesh) {
         r0.push({
           geo: t0.foliageMesh,
           tris: t0.foliageMesh.index ? t0.foliageMesh.index.count / 3 : 0,
-          make: () => foliageMaterial({ color: sp.foliageColor }),
+          make: () => foliageMaterial(
+            { color: sp.foliageColor },
+            surface.leaf,
+            seasonalFoliageStyle(sp, season),
+          ),
           // cards already cast equivalent crown coverage — mesh-leaf shadow
           // casting would double the caster load for no visible gain
           castShadow: false,
         });
       }
-      const r1 = treeParts(sp, t1);
-      const r2 = treeParts(sp, t2);
+      const r1 = treeParts(sp, t1, 'near');
+      const r2 = treeParts(sp, t2, 'mid');
       const b = bounds(r1.map((p) => p.geo));
       trackCls(ci, b.height, b.radius);
       pools.push({
@@ -218,8 +258,8 @@ export async function buildVegLibrary(
         r0,
         r1,
         r2,
-        trisR1: t1.stats.tris,
-        trisR2: t2.stats.tris,
+        trisR1: r1.reduce((sum, part) => sum + part.tris, 0),
+        trisR2: r2.reduce((sum, part) => sum + part.tris, 0),
         height: b.height,
         radius: b.radius,
       });
@@ -241,16 +281,26 @@ export async function buildVegLibrary(
       { geometry: t.bark, kind: 'bark', barkTex: barkOf(sp.barkLayer) },
     ];
     const atlas = atlases.get(sp.id);
-    if (t.foliage && atlas) parts.push({ geometry: t.foliage, kind: 'cards', atlas });
+    if (t.foliage && atlas && seasonalFoliageStyle(sp, season).coverage > 0) {
+      parts.push({ geometry: t.foliage, kind: 'cards', atlas });
+    }
     const radius = Math.max(
       t.stats.height * 0.55,
       t.skeleton.crownRadius * 1.4,
       2,
     );
-    impostors.set(
-      ci,
-      await captureImpostor(renderer, parts, { centerY: t.stats.height * 0.5, radius }),
-    );
+    try {
+      impostors.set(
+        ci,
+        await captureImpostor(renderer, parts, { centerY: t.stats.height * 0.5, radius }),
+      );
+    } finally {
+      // This tree was built solely for capture; pool R0/R1/R2 geometries
+      // were built separately above. Shared bark/foliage textures stay live.
+      t.bark.dispose();
+      t.foliage?.dispose();
+      t.foliageMesh?.dispose();
+    }
     progress(0.56 + 0.18 * ((ci + 1) / TREE_SPECIES.length), `veg: impostor ${sp.id}`);
   }
 
@@ -266,11 +316,15 @@ export async function buildVegLibrary(
       const rng = seed.rng(`veg/${sp.id}/${v}`);
       const shrub = buildShrub(sp, rng);
       const atlas = atlases.get(sp.id);
+      const surface = vegetationSurfaceProfile(sp.id);
       const parts: PoolPart[] = [
         {
           geo: shrub.bark,
           tris: shrub.bark.index ? shrub.bark.index.count / 3 : 0,
-          make: () => barkTexturedMaterial(barkOf(2)),
+          make: () => barkTexturedMaterial(
+            barkOf(sp.barkLayer),
+            barkProfileForTier(surface, 'near'),
+          ),
           castShadow: true,
         },
       ];
@@ -278,7 +332,7 @@ export async function buildVegLibrary(
         parts.push({
           geo: shrub.foliage,
           tris: shrub.foliage.index ? shrub.foliage.index.count / 3 : 0,
-          make: () => foliageCardMaterial(atlas, { color: sp.foliageColor }),
+          make: () => foliageCardMaterial(atlas, { color: sp.foliageColor }, surface.leaf),
           castShadow: true,
         });
       }
@@ -299,6 +353,7 @@ export async function buildVegLibrary(
   }
   // ferns
   const fernAtlas = atlases.get('fern');
+  const fernSurface = vegetationSurfaceProfile('fern');
   for (let v = 0; v < 4; v++) {
     const geo = buildFern(seed.rng(`veg/fern/${v}`));
     const tris = geo.index ? geo.index.count / 3 : 0;
@@ -313,7 +368,11 @@ export async function buildVegLibrary(
               geo,
               tris,
               make: () =>
-                foliageCardMaterial(fernAtlas, { color: FERN_CAPTURE.foliageColor }),
+                foliageCardMaterial(
+                  fernAtlas,
+                  { color: FERN_CAPTURE.foliageColor },
+                  fernSurface.leaf,
+                ),
               castShadow: false,
             },
           ]
@@ -359,9 +418,38 @@ export async function buildVegLibrary(
     clsMaxDist[cls] = 90;
   }
 
+  // cacti: four real geometry forms share one waxy ribbed PBR material.
+  // Scatter owns habitat placement; the asset library knows no biome rules.
+  for (let v = 0; v < 4; v++) {
+    const geo = buildCactus(seed.rng(`veg/cactus/${v}`), v);
+    const tris = geo.index ? geo.index.count / 3 : 0;
+    const b = bounds([geo]);
+    trackCls(VegClass.Cactus, b.height, b.radius);
+    pools.push({
+      cls: VegClass.Cactus,
+      variant: v,
+      r1: [
+        {
+          geo,
+          tris,
+          make: cactusMaterial,
+          castShadow: false,
+        },
+      ],
+      r2: null,
+      trisR1: tris,
+      trisR2: 0,
+      height: b.height,
+      radius: b.radius,
+    });
+  }
+  clsMaxDist[VegClass.Cactus] = 260;
+
   // ---- extras: deadfall + boulders/slabs -------------------------------------
   progress(0.86, 'veg: deadfall + boulder pools');
   const deadTex = barkOf(5);
+  const deadProfile = barkProfileForTier(vegetationSurfaceProfile('snag'), 'near');
+  const deadFarProfile = barkProfileForTier(vegetationSurfaceProfile('snag'), 'mid');
   // weathered-wood darkening: the snag bark bake is pale gray and logs read
   // as glowing white slivers in noon sun without it
   const logDim = { r: 0.6, g: 0.52, b: 0.44 };
@@ -377,7 +465,7 @@ export async function buildVegLibrary(
         {
           geo: log.geometry,
           tris: log.tris,
-          make: () => deadwoodMaterial(deadTex, logDim),
+          make: () => deadwoodMaterial(deadTex, logDim, deadProfile),
           castShadow: true,
         },
       ],
@@ -400,7 +488,7 @@ export async function buildVegLibrary(
         {
           geo: stump.geometry,
           tris: stump.tris,
-          make: () => deadwoodMaterial(deadTex, logDim),
+          make: () => deadwoodMaterial(deadTex, logDim, deadProfile),
           castShadow: true,
         },
       ],
@@ -532,7 +620,7 @@ export async function buildVegLibrary(
         {
           geo,
           tris,
-          make: () => deadwoodMaterial(deadTex, branchDim),
+          make: () => deadwoodMaterial(deadTex, branchDim, deadProfile),
           castShadow: false,
         },
       ],
@@ -542,7 +630,7 @@ export async function buildVegLibrary(
         {
           geo: geo.clone(),
           tris,
-          make: () => deadwoodMaterial(deadTex, branchDim),
+          make: () => deadwoodMaterial(deadTex, branchDim, deadFarProfile),
           castShadow: false,
         },
       ],
@@ -555,5 +643,14 @@ export async function buildVegLibrary(
   clsMaxDist[VegClass.Branch] = 230;
 
   progress(1, 'veg: pools ready');
-  return { pools, impostors, clsHeight, clsRadius, clsMaxDist, atlases, barks };
+  return {
+    pools,
+    impostors,
+    clsHeight,
+    clsRadius,
+    clsMaxDist,
+    atlases,
+    barks,
+    treeCoverage: treeSeasonCoverages(season),
+  };
 }

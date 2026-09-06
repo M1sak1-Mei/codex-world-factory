@@ -29,7 +29,9 @@ import {
   vec4,
 } from 'three/tsl';
 import { zoneMasks, type MacroParams } from '../../world/MacroMap';
-import { Biome, LAKE_LEVEL, TREELINE, WORLD_SIZE } from '../../world/WorldConst';
+import { Biome, TREELINE, WORLD_SIZE } from '../../world/WorldConst';
+import { wetlandSuitability } from '../../world/HabitatModel';
+import { TSL_HABITAT_MATH } from '../HabitatTSL';
 import type { FloatBuffer } from './HeightSynthesis';
 
 export interface BiomeSnowOpts {
@@ -134,12 +136,11 @@ export async function runBiomeSnow(
     // --- biome decision tree -----------------------------------------------------
     const isAlpine = h.greaterThan(float(TREELINE).add(tNoise.mul(60)));
     const isSubalpine = h.greaterThan(float(TREELINE - 170).add(tNoise.mul(70)));
-    const lowFlat = slope.lessThan(0.35);
-    const isWetland = moisture
-      .greaterThan(0.72 + Math.max(0, 1 - mp.landscape.ecology.wetland) * 0.24)
-      .and(lowFlat)
-      .and(h.lessThan(LAKE_LEVEL + 70))
-      .and(float(mp.landscape.ecology.wetland).greaterThan(0));
+    // Wetland is a local moisture/temperature/slope habitat, not a shelf
+    // around the original world's 142 m lake. Mountain marshes are valid.
+    const isWetland = wetlandSuitability(
+      TSL_HABITAT_MATH, moisture, slope, temp, mp.landscape.ecology.wetland,
+    ).greaterThan(0.35);
     const meadowNoise = mx_noise_float(wpos.div(560).add(vec2(mp.off.hills[0], mp.off.hills[1])));
     const isMeadow = meadowNoise
       .greaterThan(0.22 + Math.max(0, 1 - mp.landscape.ecology.meadow) * 0.9)
@@ -150,21 +151,19 @@ export async function runBiomeSnow(
       .and(float(mp.landscape.ecology.meadow).greaterThan(0));
     const isKarst = zm.tKarst.greaterThan(0.42);
 
-    const biome = isAlpine
+    const uplandBiome = isAlpine
       .select(
         float(Biome.Alpine),
         isSubalpine.select(
           float(Biome.Subalpine),
-          isWetland.select(
-            float(Biome.Wetland),
-            isKarst.select(
-              float(Biome.KarstForest),
-              isMeadow.select(float(Biome.Meadow), float(Biome.Conifer)),
-            ),
+          isKarst.select(
+            float(Biome.KarstForest),
+            isMeadow.select(float(Biome.Meadow), float(Biome.Conifer)),
           ),
         ),
       )
       .toVar();
+    const biome = isWetland.select(float(Biome.Wetland), uplandBiome);
 
     // --- vegetation density --------------------------------------------------------
     const densBase = mix(float(0.85), float(0.25), rockExposure)

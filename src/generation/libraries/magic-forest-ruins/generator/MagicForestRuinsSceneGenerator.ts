@@ -7,7 +7,7 @@ import type {
 } from '../../../core/WorldFeature';
 import type { MagicRuinsModelKit } from '../../../models/magic-ruins';
 import { assembleMagicRuinsSite } from './MagicForestRuinsGrammar';
-import { SANCTUARY_ENTRANCE_ANGLE } from './MagicForestRuinsLayout';
+import { planMagicRuinsApproach } from './MagicRuinsApproachPlanner';
 import type { MagicRuinsSitePlan } from './MagicForestRuinsPlanner';
 
 interface SiteStats {
@@ -79,23 +79,11 @@ function buildSite(
 function primarySpawnFor(
   sites: readonly MagicRuinsSitePlan[],
   terrain: TerrainSurface,
+  obstacles: readonly SegmentObstacle[],
 ): FeatureSpawn | null {
   const hero = sites.find((site) => site.kind === 'sanctuary') ?? sites[0];
   if (!hero) return null;
-  const localX = Math.cos(SANCTUARY_ENTRANCE_ANGLE) * (hero.radius + 5);
-  const localZ = Math.sin(SANCTUARY_ENTRANCE_ANGLE) * (hero.radius + 5);
-  const ca = Math.cos(hero.yaw);
-  const sa = Math.sin(hero.yaw);
-  const x = hero.center[0] + ca * localX + sa * localZ;
-  const z = hero.center[1] - sa * localX + ca * localZ;
-  const dx = hero.center[0] - x;
-  const dz = hero.center[1] - z;
-  return {
-    position: [x, terrain.heightAt(x, z) + 1.7, z],
-    yaw: Math.atan2(-dx, -dz),
-    pitch: -0.055,
-    mode: 'walk',
-  };
+  return planMagicRuinsApproach(hero, terrain, obstacles);
 }
 
 /**
@@ -110,11 +98,12 @@ export function generateMagicForestRuinsScene(
   const root = new Group();
   root.name = 'feature-library:magic-forest-ruins';
   const builtSites = sites.map((site) => buildSite(site, terrain, models));
+  const obstacles = builtSites.flatMap((site) => site.obstacles);
   for (const site of builtSites) root.add(site.group);
   return {
     group: root,
-    primarySpawn: primarySpawnFor(sites, terrain),
-    obstacles: builtSites.flatMap((site) => site.obstacles),
+    primarySpawn: primarySpawnFor(sites, terrain, obstacles),
+    obstacles,
     stats: {
       'features.ruinsSites': sites.length,
       'features.ruinBlocks': builtSites.reduce((sum, site) => sum + site.stats.blocks, 0),

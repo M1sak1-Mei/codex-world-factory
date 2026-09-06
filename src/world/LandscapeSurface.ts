@@ -1,9 +1,12 @@
 import type { WorldSeed } from '../core/Seed';
+import { generatePavedRoadNetwork } from '../generation/libraries/paved-roads/generator/PavedRoadNetworkGenerator';
 import type { ResolvedLandscapeProfile } from './LandscapeProfile';
+
+export type SurfacePathKind = 'cobble' | 'concrete';
 
 export interface SurfacePath {
   id: string;
-  kind: 'cobble';
+  kind: SurfacePathKind;
   points: [number, number][];
   width: number;
   strength: number;
@@ -32,6 +35,14 @@ export function makeLandscapeSurfaceLayout(
   seed: WorldSeed,
   profile: ResolvedLandscapeProfile,
 ): LandscapeSurfaceLayout {
+  if (profile.surfaces.layout === 'paved-network') {
+    return generatePavedRoadNetwork(seed, {
+      worldHalf: 2048,
+      cobbleStrength: profile.surfaces.cobble,
+      concreteStrength: profile.surfaces.concrete,
+    });
+  }
+
   const paths: SurfacePath[] = [];
   const pads: SurfacePad[] = [];
 

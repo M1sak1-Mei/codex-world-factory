@@ -14,6 +14,37 @@ three.js `WebGPURenderer`、TSL 和原生 WGSL compute 为基础，通过可复�
 
 ## 已有场景
 
+### 品质样板与本轮升级
+
+推荐先打开 **魔法森林河谷**：
+
+```text
+http://127.0.0.1:5173/?showcase=enchanted-river&preset=low
+```
+
+`showcase` 是纯数据组合，复用原有地形、生态和内容库，不创建另一套生成器。
+显式 URL 参数始终覆盖样板默认值，例如追加 `&season=autumn` 或 `&seed=17`。
+
+| 样板 | 组合 |
+|---|---|
+| `enchanted-river` | 折叠山脉、野生林地、湿岸与魔法遗迹；入口会检查地形视线。 |
+| `autumn-river` | 相同地形种子的秋日荒野，不叠加遗迹或城市。 |
+| `oasis-sanctuary` | 沙丘绿洲；干旱区以仙人掌/裸地为主，树木偏向湿润区域。 |
+
+本轮品质改进：
+
+- 叶簇增加法线、粗糙度和 AO 贴图，中近景不再仅依赖整片卡片法线；不增加树木实体叶面数。
+- 远景森林使用物种与季节的代表群落色板；冬季落叶树不提交空树冠。
+- 石材增加凹凸、风化倒角与实例色差；地衣细分贴地并自然裁切边缘；水晶和符文门保留结构与颜色。
+- 生境控制和物种权重独立为 `HabitatModel`；接受概率与最终植物抽样一致，草地采用多尺度世界空间斑块。
+- 树木、水岸和地表湿润读取局部水位；湿地由湿度、温度和坡度判断，不绑定原来的固定湖面海拔。
+- 野生林地使用独立的风化岩面色板，减少山坡泛白；远景积雪也遵守 `exclude=snow`。
+- Hero 树木按距离与稳定实例身份选择；超过每变体 5 棵预算时完整回退到 Near。近景阴影独立于 Hero 名额。
+
+运行 `npm run test:quality` 可单独验证本轮品质合同。实现边界、验收方法和扩展要求见
+[场景品质与生成标准](docs/SCENE-QUALITY.md)。**本轮生态规则升级会改变旧 seed 的植被分布**；
+同一版本、同一完整配置仍可复现，跨版本精确复现需要同时保留 Git commit 和 URL。
+
 ### 程序化荒野 `wilderness`
 
 基础地形、水文、生态、光照、大气、水体和探索系统，不叠加人工遗迹。
@@ -21,7 +52,7 @@ three.js `WebGPURenderer`、TSL 和原生 WGSL compute 为基础，通过可复�
 ![Procedural wilderness](docs/readme-wilderness.png)
 
 ```text
-http://localhost:5173/?world=wilderness&terrain=laas&seed=42&preset=low
+http://127.0.0.1:5173/?world=wilderness&terrain=laas&seed=42&preset=low
 ```
 
 ### 魔法森林遗迹 `magic-forest-ruins`
@@ -32,7 +63,7 @@ http://localhost:5173/?world=wilderness&terrain=laas&seed=42&preset=low
 ![Magic forest ruins](docs/readme-magic-forest-ruins.jpg)
 
 ```text
-http://localhost:5173/?world=magic-forest-ruins&terrain=laas&seed=42&preset=low
+http://127.0.0.1:5173/?world=magic-forest-ruins&terrain=laas&seed=42&preset=low
 ```
 
 一次验证样例（`seed=42`、`terrain=laas`）生成 3 个遗迹点、847 块程序化
@@ -45,7 +76,7 @@ http://localhost:5173/?world=magic-forest-ruins&terrain=laas&seed=42&preset=low
 植被清除区、城市入口、出生点、建筑碰撞边界、LOD 与运行时统计。
 
 ```text
-http://localhost:5173/?world=fantasy-city&terrain=laas&seed=84&preset=low
+http://127.0.0.1:5173/?world=fantasy-city&terrain=laas&seed=84&preset=low
 ```
 
 默认 `fantasy-quarter` 配方以一个 3×3 街区骨架为目标：中心 1 栋公会大厅，
@@ -54,15 +85,18 @@ seed stream 决定；极端山地或涉水地块会被跳过，让城市降级�
 
 ## 世界生成逻辑
 
-世界由三个相互独立的输入维度组合：
+世界由四个相互独立的生成维度组合；季节是其上的表现层，不会重新抽取地形或摆放：
 
 ```text
-World = Seed × TerrainRecipe × WorldRecipe
+World = Seed × TerrainRecipe × LandscapeProfile × WorldRecipe
+Presentation = World × Season
 ```
 
 - `seed`：控制可复现的伪随机变化。
 - `terrain`：控制山脉、裂谷、火山口等宏观地貌。
+- `landscape`：控制生态密度、沙地/雪地和人工地表等景观倾向。
 - `world`：控制遗迹、建筑、道路等地形之上的内容组合。
+- `season`：只控制叶色、落叶比例、冠层透光和远景植被表现。
 
 完整启动链如下：
 
@@ -104,14 +138,16 @@ feature/magic-forest-ruins/ancient-grove/site-0
 
 `Heightfield.generate()` 根据 `TerrainRecipe` 建立高度场：
 
-1. 原始宏观地形提供山体、峡谷、喀斯特区和湖盆骨架。
-2. 各向异性 Gaussian stamps 叠加可编辑的山脉、裂谷或火山口形态。
+1. 每个配方先声明基础骨架权重：高山、喀斯特、湖盆、主河谷、支谷和远景山脉。
+2. 各向异性 Gaussian stamps 再叠加可编辑的山脉、裂谷或火山口形态。
 3. 水力与热力侵蚀改变坡面、沉积和沟谷。
 4. 水文系统计算流向、河道、湖泊和出水口。
 5. 湿度、坡度、海拔和暴露度共同形成生物群系与积雪。
 6. CDLOD 地形瓦片和远景壳体负责最终渲染。
 
-Gaussian 配方只改变宏观地貌和硬度，不绕过侵蚀、水文、植被和渲染主流程。
+基础骨架和 Gaussian stamps 都只改变宏观地貌与硬度，不绕过侵蚀、水文、植被和
+渲染主流程。只有 `laas` 保留完整的原始高山 + 喀斯特双核心；其他配方会按自身
+构图关闭或弱化它们，因此不再出现“换了配方，中间仍是同两座山”的情况。
 
 ### 3. 地形只读接口
 
@@ -173,6 +209,11 @@ GPU clustered-Poisson scatter 和跟随相机的 `GroundRing` 都消费同一份
 | `basin-country` | 被不对称高地环绕的开阔盆地。 |
 | `desert-mesas` | 干旱平原上的硬质台地与孤峰。 |
 | `glacial-uplands` | 高地肩部、冰川槽谷和雪地构图。 |
+| `canyon-badlands` | 被主峡谷与支峡谷切开的硬质台地和干燥阶地。 |
+| `dune-oasis` | 平行沙丘、丘间洼地和受庇护绿洲盆地。 |
+| `coastal-islands` | 主岛、外海小岛、潮汐水道和被淹没的低地。 |
+| `karst-sinklands` | 石灰岩峰林、复合落水洞和封闭盆地。 |
+| `volcanic-highlands` | 盾状火山、嵌套火山口、寄生锥和熔岩缺口。 |
 
 ### 顶层世界配方
 
@@ -207,7 +248,7 @@ GPU clustered-Poisson scatter 和跟随相机的 `GroundRing` 都消费同一份
 | 模块 | 当前能力 |
 |---|---|
 | Terrain | 高度场、Gaussian stamps、侵蚀、水文、河流、湖泊、生物群系、积雪、CDLOD。 |
-| Vegetation | 8 类树木、程序化枝干与树冠、3 类灌木、蕨类、3 类花、倒木、草地和地面碎屑。 |
+| Vegetation | 8 类树木、四季冠层、程序化枝干与树冠、3 类灌木、蕨类、3 类花、4 种仙人掌形态、倒木、草地和地面碎屑。 |
 | GPU scatter | clustered-Poisson 分布、分层排除、GPU culling、间接绘制和 LOD ring。 |
 | Lighting | 四级 CSM、PCSS、接触阴影、terrain-relative irradiance probes、GTAO。 |
 | Atmosphere | Hillaire LUT 大气、体积云、云影、雾和林冠光束。 |
@@ -237,23 +278,23 @@ npm run dev
 打开：
 
 ```text
-http://localhost:5173
+http://127.0.0.1:5173
 ```
 
 常用示例：
 
 ```text
 # 原始荒野
-http://localhost:5173/?world=wilderness&terrain=laas&seed=42&preset=low
+http://127.0.0.1:5173/?world=wilderness&terrain=laas&seed=42&preset=low
 
 # 魔法森林遗迹
-http://localhost:5173/?world=magic-forest-ruins&terrain=laas&seed=42&preset=low
+http://127.0.0.1:5173/?world=magic-forest-ruins&terrain=laas&seed=42&preset=low
 
 # 折叠山脉上的魔法遗迹
-http://localhost:5173/?world=magic-forest-ruins&terrain=folded-ranges&seed=7&preset=low
+http://127.0.0.1:5173/?world=magic-forest-ruins&terrain=folded-ranges&seed=7&preset=low
 
 # 程序化奇幻城市
-http://localhost:5173/?world=fantasy-city&terrain=laas&seed=84&preset=low
+http://127.0.0.1:5173/?world=fantasy-city&terrain=laas&seed=84&preset=low
 ```
 
 ### URL 参数
@@ -261,10 +302,12 @@ http://localhost:5173/?world=fantasy-city&terrain=laas&seed=84&preset=low
 | 参数 | 示例 | 说明 |
 |---|---|---|
 | `seed` | `42` | 世界主种子。 |
+| `showcase` | `enchanted-river` | 可选的场景组合默认值；显式参数覆盖它。 |
 | `terrain` | `folded-ranges` | 地形配方。 |
-| `landscape` | `balanced` / `wild` / `settled` / `arid` / `alpine` / `legacy` | 地貌、生态和地表预设。 |
+| `landscape` | `balanced` / `wild` / `settled` / `paved` / `arid` / `alpine` / `oasis` / `coastal` / `moorland` / `legacy` | 地貌、生态和地表预设。 |
 | `include` | `plains,forest,flowers,cobble` | 强制启用的景观标签，逗号分隔。 |
 | `exclude` | `desert,snow,concrete` | 禁止生成的景观标签；优先级最高。 |
+| `season` | `spring` / `summer` / `autumn` / `winter` | 植被季节；默认 `summer`，不改变 seed 布局。 |
 | `world` | `magic-forest-ruins` | 顶层世界内容组合。 |
 | `preset` | `low` / `high` / `ultra` | 质量配置。 |
 | `T` | `16.7` | 时间，单位为小时。 |
@@ -294,7 +337,7 @@ npm run preview
 ```
 
 - `npm run build` 先运行严格 TypeScript 检查，再生成 `dist/`。
-- `npm run preview` 在 `http://localhost:5174` 预览生产构建。
+- `npm run preview` 在 `http://localhost:5174/codex-world-factory/` 预览生产构建，预览路径与生产资源路径保持一致。
 - 生产站点必须通过 HTTPS 提供，localhost 开发环境除外；WebGPU 需要安全上下文。
 
 ### 静态托管
@@ -375,12 +418,13 @@ src/generation/
 ### 新增地形配方
 
 1. 在 `src/world/TerrainRecipe.ts` 增加 `TerrainRecipe`。
-2. 为每个 Gaussian stamp 提供稳定、唯一的 `id`。
-3. 调整 `center`、`sigma`、`rotation`、`amplitude`、`sharpness` 和 `hardness`。
-4. 只使用有上限的 seed jitter，避免场景失控。
-5. 将 ID 加入 `TERRAIN_RECIPE_IDS` 和配方表。
-6. 运行地形确定性测试和多 seed WebGPU 批量截图。
-7. 检查水面覆盖、地图边缘出水口、相机出生点和植被分布。
+2. 先设置 `foundation` 中六类基础骨架的权重，明确哪些旧构图需要保留。
+3. 为每个 Gaussian stamp 提供稳定、唯一的 `id`。
+4. 调整 `center`、`sigma`、`rotation`、`amplitude`、`sharpness` 和 `hardness`。
+5. 只使用有上限的 seed jitter，避免场景失控。
+6. 将 ID 加入 `TERRAIN_RECIPE_IDS` 和配方表。
+7. 运行地形确定性测试和多 seed WebGPU 批量截图。
+8. 检查水面覆盖、地图边缘出水口、干地出生点、瓦片接缝和植被分布。
 
 详细规则见 [docs/TERRAIN-GENERATOR.md](docs/TERRAIN-GENERATOR.md)。
 
@@ -558,19 +602,31 @@ World = Seed × TerrainRecipe × LandscapeProfile × WorldRecipe
 
 ```text
 # 丰富的默认森林：丘陵、平原、盆地、花草和少量铺装
-http://localhost:5173/?terrain=laas&landscape=balanced&seed=42&preset=low
+http://127.0.0.1:5173/?terrain=laas&landscape=balanced&seed=42&preset=low
 
-# 明确要求低地、森林、花和石板路，同时禁止沙漠、雪和水泥地
-http://localhost:5173/?terrain=rolling-lowlands&landscape=balanced&include=plains,basins,forest,grass,flowers,cobble&exclude=desert,snow,concrete&seed=42&preset=low
+# 无固定中央山体的滚动低地案例：丘陵、平原、森林、草甸和花，明确禁用高山
+http://127.0.0.1:5173/?terrain=rolling-lowlands&landscape=balanced&include=hills,plains,forest,meadow,grass,flowers&exclude=mountains,desert,snow,cobble,concrete&seed=137&preset=low&alt=220&x=-700&z=700&yaw=-0.785&pitch=-0.28
+
+# 大规模铺装路网：石质主轴、混凝土横轴、环路、放射支路和广场
+http://127.0.0.1:5173/?terrain=rolling-lowlands&landscape=paved&exclude=desert,snow&seed=84&preset=low&alt=320&x=0&z=0&yaw=-0.78&pitch=-1.05&freeze=1
 
 # 沙漠台地，不生成森林、雪地、花和人工地坪
-http://localhost:5173/?terrain=desert-mesas&landscape=arid&include=desert&exclude=forest,snow,flowers,cobble,concrete&seed=17&preset=low
+http://127.0.0.1:5173/?terrain=desert-mesas&landscape=arid&include=desert&exclude=forest,snow,flowers,cobble,concrete&seed=17&preset=low
 
 # 冰川雪原和高山
-http://localhost:5173/?terrain=glacial-uplands&landscape=alpine&include=mountains,snow&exclude=desert,concrete&seed=9&preset=low
+http://127.0.0.1:5173/?terrain=glacial-uplands&landscape=alpine&include=mountains,snow&exclude=desert,concrete&seed=9&preset=low
+
+# 沙丘绿洲和程序化仙人掌；不要城市、遗迹和铺装
+http://127.0.0.1:5173/?world=wilderness&terrain=dune-oasis&landscape=oasis&include=desert,cacti,wetland&exclude=cobble,concrete&season=summer&seed=73&preset=low
+
+# 秋季海岛森林
+http://127.0.0.1:5173/?world=wilderness&terrain=coastal-islands&landscape=coastal&include=forest,wetland&exclude=cobble,concrete&season=autumn&seed=31&preset=low
+
+# 冬季喀斯特峰林；阔叶落叶，针叶树保留大部分冠层
+http://127.0.0.1:5173/?world=wilderness&terrain=karst-sinklands&landscape=moorland&include=hills,shrubs&exclude=desert,cobble,concrete&season=winter&seed=115&preset=low
 
 # 完全复现升级前的自然地形参数
-http://localhost:5173/?terrain=laas&landscape=legacy&seed=42&preset=low
+http://127.0.0.1:5173/?terrain=laas&landscape=legacy&seed=42&preset=low
 ```
 
 ### 景观预设
@@ -581,8 +637,12 @@ http://localhost:5173/?terrain=laas&landscape=legacy&seed=42&preset=low
 | `balanced` | 新默认值；森林、草甸、丘陵、平原、盆地和少量沙地/铺装混合。 |
 | `wild` | 更强地形起伏、扭曲、森林和灌木，关闭人工铺装。 |
 | `settled` | 更平缓、更开阔，增加草地、花、石板路和水泥地坪，适合城镇。 |
+| `paved` | 大尺度铺装路网：石质主轴、混凝土横轴、环路、四条放射支路、中央广场与道路节点。 |
 | `arid` | 干旱、低植被、高沙地权重，适合荒漠和台地。 |
 | `alpine` | 更强山体、岩石细节和积雪，减少平原和低地植被。 |
+| `oasis` | 沙地与干旱占主导，同时保留局部湿地和草地，仙人掌密度最高。 |
+| `coastal` | 高湿地、草甸和沙岸权重，适合群岛、海岸低地和河口。 |
+| `moorland` | 多丘陵、泥炭洼地、灌木和草地，森林较疏、无仙人掌。 |
 
 ### 可包含/排除的标签
 
@@ -590,27 +650,88 @@ http://localhost:5173/?terrain=laas&landscape=legacy&seed=42&preset=low
 |---|---|
 | 地貌 | `mountains`, `hills`, `plains`, `basins` |
 | 生态 | `forest`, `meadow`, `wetland`, `desert`, `snow` |
-| 地表覆盖 | `grass`, `shrubs`, `flowers` |
+| 地表覆盖 | `grass`, `shrubs`, `flowers`, `cacti` |
 | 人工/特殊地表 | `cobble`, `concrete`；沙地由 `desert` 同时开启 |
 
 ### 新增地形与生态能力
 
-- 地形配方增加 `rolling-lowlands`、`basin-country`、`desert-mesas`、
-  `glacial-uplands`；连同原有配方共 8 种宏观构图。
+- 地形配方增加 `rolling-lowlands`、`basin-country`、`desert-mesas`、`glacial-uplands`、
+  `canyon-badlands`、`dune-oasis`、`coastal-islands`、`karst-sinklands` 和
+  `volcanic-highlands`；连同原有配方共 13 种宏观构图。
+- 每个 `TerrainRecipe` 现在拥有独立 `foundation`，可分别控制原始高山、喀斯特、湖盆、
+  主河谷、支谷和远景山脉；Gaussian 不再被迫叠加在相同的双山骨架上。
+- CDLOD 接缝使用更深的双面 skirt，远景壳只在方形世界边缘保留窄重叠带；默认出生点
+  同时检查干地邻域并在植被散布前预留净空，避免湖岸透明面和远景壳被误认为地面穿透。
+- 相机近裁剪面从 30 cm 缩短到 8 cm，并以统一的微位移预算校验飞行相机地表净空；
+  贴近坡面观察时不会再由近裁剪面切掉脚下三角形、露出后方地形。
+- WebGPU 设备初始化会显式申请 32 个片元阶段采样纹理槽位（当前完整地形材质最低需要 17 个），
+  并在显卡上限不足时于启动阶段明确报错，避免管线创建失败后以“透明地面”的形式静默漏画。
 - 高度场噪声现在分别暴露宏观尺度、丘陵、平原、盆地、山体、微细节和河谷扭曲强度，
   预设只提供默认值，不再把这些强度散落写死在不同 pass 中。
 - 地表分类新增独立 `surfaceTex`：R/G/B/A 分别表示沙地、石板路、水泥地和任意人工地面。
   地形材质、微位移、树木散布、灌木/花散布和相机周围草地共同消费这张纹理，
   所以道路不会重新长满树草，水泥地也不会继承岩石微位移。
+- `paved` 路网由独立纯数据生成器输出 `SurfacePath` / `SurfacePad`，贴地网格运行时再消费同一布局；
+  生成器不依赖 Three.js/WebGPU，渲染器也不负责路网规划，后续可以独立替换道路语法或铺装材质。
+- 铺装运行时会以整条横断面的最高地面为路基，按 2.5% 目标纵坡平滑标高，并将单点填方限制在
+  2.5 米以内；两侧路肩向原始地面放坡，避免道路复制细碎地形或变成无限抬高的悬空平台。
+- 交叉口采用独占材质优先级：水泥节点/广场覆盖水泥道路，水泥道路覆盖石板道路；低优先级网格
+  会在交叉范围真正裁洞，GPU 地表分类也会清除重叠通道，避免叠色、闪烁和共面穿插。
 - 树木目录由 6 种扩展到 8 种：云杉、松树、山毛榉、白桦、喀斯特曲木、枯立木、
   古橡树和河岸柳树。现有榛树灌木、粉花灌木、杜松、蕨类、伞形花、铃形花和雏菊继续保留，
   且草、灌木、花可以分别包含或排除。
+- 新增仙人掌生态类和 4 个确定性几何变体：柱状仙人掌、桶形仙人掌、掌状仙人掌和群生柱体。
+  GPU scatter 根据沙地、干燥度、积雪、坡度以及 `desert` / `cacti` 权重决定出现位置；
+  `exclude=cacti` 只移除仙人掌，不会连带关闭整个沙漠。
+- 新增 `spring`、`summer`、`autumn`、`winter` 四季表现。阔叶树冬季落叶，针叶树保留大部分针叶；
+  atlas、实体叶、远景 impostor、冠层 GI 和阴影代理消费同一季节覆盖率，切换季节不会改变任何位置 seed。
 - 人工地表布局是基于命名 seed stream 生成的普通数据结构；未来道路 graph、城市街区和遗迹模块
   可以注入同一种 path/pad primitive，不需要改写地形材质。
 
 调试地表分类时可使用 `?view=sand`、`?view=cobble`、`?view=concrete` 和
 `?view=artificial`。景观配方测试命令为 `npm run test:landscape`，完整回归仍使用
 `npm run test:world` 和 `npm run build`。
+
+## 分级植被表面系统
+
+植被现在把生长骨架、几何表面和 PBR 配方拆成三个独立层。树种仍由 `Skeleton.ts`
+决定枝干和树冠，`TreeBuilder.ts` 根据距离层选择表面实现，`VegMaterials.ts` 消费统一的
+颜色、法线、粗糙度、AO、高度和叶片透光参数。增强材质不会改变树木位置或骨架 seed。
+
+当前 8 个树种已经全部拥有独立表面配置和 Hero 实现：
+
+- 云杉、松树使用各自的裂纹/板状树皮和带曲率、收尖、交叉体积面的实体针叶。
+- 山毛榉、白桦、喀斯特曲木和柳树使用五列曲面阔叶，分别配置叶缘、卷曲、杯状边缘、
+  中脉/侧脉和叶簇排布；柳树拥有独立灰褐绳状树皮和披针形叶。
+- 古橡树（`ancient-oak-v2-relief`）使用 16 段六组真实裂叶，以及深纵裂、断续横裂、
+  五步浮雕视差和裂缝遮蔽。
+- 枯立木使用强化纵裂、腐朽伤疤、断枝、剥皮和不规则无叶轮廓。
+- 所有活树 Hero 都有物种化椭圆截面、扭转、轮廓扰动、枝杈连接、根颈、根系和缺陷。
+- Near（28–150 m）：完整枝干轮廓和树冠卡片，树皮高度通道使用三步浮雕采样。
+- Mid（150–460 m）：简化枝干和树冠卡片，只保留法线、粗糙度与 AO，不再计算视差。
+- Far（460 m 以外）：沿用可重新受光的八面体 impostor 和远景林冠壳。
+
+Hero 每个树种、每个结构变体最多提交 5 棵；实体叶/针叶使用物种化锚点上限，剩余冠层
+由同一高细节源几何捕获的卡片维持覆盖。灌木、杜松和蕨类也升级了 atlas 捕获源；草、花、
+蘑菇、岩石、枯木、落叶、树皮碎片和细枝统一使用 Physical Node PBR 与类别特有微法线。
+森林仍使用 GPU scatter、间接绘制、视锥/地形遮挡剔除和互补抖动 LOD。
+
+独立对比场景会使用完全相同的 seed 在左右生成旧版与增强版橡树：
+
+```text
+http://127.0.0.1:5173/?scene=veghero&seed=84&preset=low&freeze=1&hud=0
+```
+
+使用 `species=spruce|pine|beech|birch|karst|snag|oak|willow` 可以在同一个实验室中
+逐个检查全部树种；可追加 `season=spring|summer|autumn|winter` 对比叶色和落叶状态，例如
+`?scene=veghero&species=birch&season=autumn&seed=84&preset=low&freeze=1&hud=0`。
+
+测试使用 `npm run test:assets` 和 `npm run test:ecology`；它们会验证全部树种的配置与骨架不变性、树皮层唯一性、
+裂叶/曲面阔叶、曲线交叉针叶、Physical Node 材质、微法线、岩石 LOD、枯木和小型植被。
+
+全部自然素材的七项准入门槛、PBR/微几何要求、LOD 预算、物种接入流程和提交检查清单见
+[程序化自然素材开发标准](docs/NATURAL-ASSET-DEVELOPMENT-STANDARD.md)。新增树种、灌木、
+草花、岩石或枯木时必须同时满足该文档和现有自动化测试。
 
 ## 来源与维护
 

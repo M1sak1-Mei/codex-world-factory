@@ -21,6 +21,7 @@ import {
   float,
   max,
   min,
+  mix,
   mx_fractal_noise_float,
   mx_noise_float,
   mx_worley_noise_float,
@@ -34,7 +35,9 @@ import type { NF, NV2 } from '../gpu/TSLTypes';
 import {
   resolveGaussianStamps,
   type GaussianStamp,
+  type TerrainFoundation,
   type TerrainRecipeId,
+  terrainRecipe,
 } from './TerrainRecipe';
 import {
   resolveLandscapeProfile,
@@ -54,6 +57,8 @@ export interface MacroParams {
   surfaceLayout: LandscapeSurfaceLayout;
   /** Seed-resolved, art-directed terrain modifiers. */
   gaussianStamps: GaussianStamp[];
+  /** Per-recipe weights for the reusable LAAS macro-terrain skeleton. */
+  foundation: Readonly<TerrainFoundation>;
   alpC: [number, number];
   alpR: number;
   lakeC: [number, number];
@@ -118,6 +123,7 @@ export function makeMacroParams(
     landscape,
     surfaceLayout: makeLandscapeSurfaceLayout(seed, landscape),
     gaussianStamps: resolveGaussianStamps(seed, recipeId),
+    foundation: terrainRecipe(recipeId).foundation,
     alpC: jit(rngAnchor, [1460, -1470], 150),
     alpR: 1820 + rngAnchor.range(-120, 120),
     lakeC,
@@ -255,10 +261,10 @@ export function zoneMasks(p: NV2, mp: MacroParams): ZoneMasks {
   const o = mp.off;
   const dAlp = p.sub(vec2(mp.alpC[0], mp.alpC[1])).length();
   const tAlp = pow(falloff(dAlp, mp.alpR), 1.2).mul(
-    mp.landscape.noise.mountains > 0 ? 1 : 0,
+    mp.landscape.noise.mountains > 0 ? mp.foundation.alpineMassif : 0,
   );
   const dLake = p.sub(vec2(mp.lakeC[0], mp.lakeC[1])).length();
-  const tLake = falloff(dLake, mp.lakeR);
+  const tLake = falloff(dLake, mp.lakeR).mul(mp.foundation.lakeBasin);
   const kw = vec2(
     mx_noise_float(p.div(430).add(vec2(o.karst[0], o.karst[1]))),
     mx_noise_float(p.div(430).add(vec2(o.karst[1], o.karst[0]))),
@@ -270,7 +276,7 @@ export function zoneMasks(p: NV2, mp: MacroParams): ZoneMasks {
     pk.x.sub(mp.karstC[0]).mul(ca).sub(pk.y.sub(mp.karstC[1]).mul(sa)).div(1.3),
     pk.x.sub(mp.karstC[0]).mul(sa).add(pk.y.sub(mp.karstC[1]).mul(ca)).mul(1.15),
   );
-  const tKarst = falloff(pkr.length(), mp.karstR);
+  const tKarst = falloff(pkr.length(), mp.karstR).mul(mp.foundation.karstPlateau);
   return { tAlp, tKarst, tLake };
 }
 
@@ -456,28 +462,38 @@ export function macroTerrain(p: NV2, mp: MacroParams, detail: 'full' | 'far'): M
         .pow(1.5)
         .mul(1750 * controls.mountains)
         .mul(band)
-        .mul(gaps),
+        .mul(gaps)
+        .mul(mp.foundation.outerRanges),
     );
   }
 
   // gentle monotonic tilt toward the valley spine so hill country drains
   // (drainage-by-design: post-hoc erosion cannot carve 30 m through saddles)
-  h = h.add(min(valleyDist.mul(0.06), 95).mul(tAlp.oneMinus()).mul(tKarst.oneMinus()));
+  h = h.add(
+    min(valleyDist.mul(0.06), 95)
+      .mul(tAlp.oneMinus())
+      .mul(tKarst.oneMinus())
+      .mul(mp.foundation.mainValley),
+  );
 
   // --- carve valley + tributary (U-profiles down to interpolated floors) ------
   // outer U-shape plus a narrower inner trench so the floor isn't an airstrip
   const uMain = pow(smoothstep(0, mp.valleyWidth, valleyDist), 2.2);
-  h = vf.valleyFloor.add(h.sub(vf.valleyFloor).mul(uMain));
+  const mainCarved = vf.valleyFloor.add(h.sub(vf.valleyFloor).mul(uMain));
+  h = mix(h, mainCarved, mp.foundation.mainValley);
   // inner trench concentrates the river (floors are tuned so its bottom stays
   // above lake level until the mouth); the trench fades across the lake so the
   // outlet sill stays at the designed lake level
   const trench = smoothstep(120, 18, valleyDist)
     .mul(16)
-    .mul(smoothstep(0.5, 0.12, tLake));
+    .mul(smoothstep(0.5, 0.12, tLake))
+    .mul(mp.foundation.mainValley);
   h = h.sub(trench);
   if (full) {
     const uTrib = pow(smoothstep(0, mp.tribWidth, tribDist), 1.6);
-    const tribInfl = tKarst.pow(0.5); // tributary only carves inside/near karst
+    const tribInfl = tKarst
+      .pow(0.5)
+      .mul(mp.foundation.tributary); // tributary only carves inside/near karst
     const carved = vf.tribFloor.add(h.sub(vf.tribFloor).mul(uTrib));
     h = carved.mul(tribInfl).add(h.mul(tribInfl.oneMinus()));
   }

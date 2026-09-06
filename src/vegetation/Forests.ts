@@ -60,6 +60,7 @@ import {
   Return,
   atomicAdd,
   atomicLoad,
+  atomicMin,
   atomicStore,
   float,
   instanceIndex,
@@ -87,22 +88,26 @@ import { instanceVeg, updateVegViewPos, type RingFade } from '../render/VegInsta
 import { depthPrepassTwin } from '../render/VegPrepass';
 import type { NF, NI, NU, NV3, NV4 } from '../gpu/TSLTypes';
 import type { VegLib } from './VegLibrary';
+import { VEGETATION_TIER_POLICY } from './VegetationProfiles';
+import {
+  HERO_DISTANCE_STEPS, HERO_EMPTY_KEY, HERO_SLOT_BITS, HERO_SLOT_LIMIT, HERO_SLOT_MASK,
+} from './VegetationLodBudget';
 
 // ring distances (m) + dither bands (user feedback: transitions read too
 // close — full-card trees hold to 150 m, impostors start at 460 m).
 // Hero ring 0 (≤26 m): full bark + cards + REAL mesh leaves — the nanite-
 // equivalence near field (spec floor: hero tree ≥100k tris).
-const R0_FAR = 26;
-const BAND0 = 5;
-const R1_FAR = 150;
-const BAND1 = 14;
-const R2_FAR = 460;
-const BAND2 = 36;
+const R0_FAR = VEGETATION_TIER_POLICY.hero.far;
+const BAND0 = VEGETATION_TIER_POLICY.hero.band;
+const R1_FAR = VEGETATION_TIER_POLICY.near.far;
+const BAND1 = VEGETATION_TIER_POLICY.near.band;
+const R2_FAR = VEGETATION_TIER_POLICY.mid.far;
+const BAND2 = VEGETATION_TIER_POLICY.mid.band;
 const EX_R1_FAR = 120;
 const EX_BAND = 15;
 
 // per-group compact-region capacities
-const CAP_HERO = 48;
+const CAP_HERO = VEGETATION_TIER_POLICY.hero.maxPerVariant;
 const CAP_TREE_R1 = 6144;
 const CAP_TREE_R2 = 8192;
 const CAP_IMPOSTOR = 49152;
@@ -115,7 +120,7 @@ const TREE_POOL_COUNT = TREE_SPECIES_COUNT * 4;
 const TREE_RING_GROUPS = TREE_POOL_COUNT * 2;
 const IMPOSTOR_START = TREE_RING_GROUPS;
 const UNDER_START = IMPOSTOR_START + TREE_SPECIES_COUNT;
-const UNDER_CLASS_COUNT = 7;
+const UNDER_CLASS_COUNT = 8;
 const EXTRA_START = UNDER_START + UNDER_CLASS_COUNT * 4;
 const EXTRA_CLASS_START = 16;
 const EXTRA_CLASS_COUNT = 8;
@@ -143,7 +148,7 @@ function groupOf(cls: number, variant: number, ring: 0 | 1 | 2 | 3): number {
     if (ring === 3) return IMPOSTOR_START + cls;
     return (cls * 4 + variant) * 2 + (ring - 1);
   }
-  if (cls < 15) return UNDER_START + (cls - 8) * 4 + variant;
+  if (cls < 16) return UNDER_START + (cls - 8) * 4 + variant;
   const pe = (cls - EXTRA_CLASS_START) * 4 + variant;
   return EXTRA_START + pe * 2 + (ring - 1);
 }
@@ -344,6 +349,11 @@ export class Forests {
     }
     this.compact = instancedArray(off, 'uint');
     this.counters = instancedArray(GROUPS, 'uint').toAtomic();
+    if (this.scatter.trees.count >= HERO_SLOT_LIMIT) {
+      throw new Error('Tree population exceeds the Hero selection identity budget');
+    }
+    const heroKeys = instancedArray(TREE_POOL_COUNT * CAP_HERO, 'uint').toAtomic();
+    const heroSelected = instancedArray(Math.max(this.scatter.trees.count, 1), 'uint');
     const offBuf = storage(new StorageBufferAttribute(offsets, 1), 'uint', GROUPS);
     const capBuf = storage(
       new StorageBufferAttribute(this.groupCaps.slice(), 1),
@@ -442,7 +452,7 @@ export class Forests {
     const layerOf = (cls: number): ScatterLayer =>
       cls < TREE_SPECIES_COUNT
         ? this.scatter.trees
-        : cls < 15
+        : cls < 16
           ? this.scatter.understory
           : cls < 20
             ? this.scatter.extras
@@ -495,7 +505,7 @@ export class Forests {
         return { fadeInAt: R2_FAR, band: BAND2 };
       }
       const maxD = this.lib.clsMaxDist[cls] ?? 150;
-      if (cls < 15) return { fadeOutAt: maxD - 15, band: 15 };
+      if (cls < 16) return { fadeOutAt: maxD - 15, band: 15 };
       const hasR2 = cls === 18 || cls === 19 || cls === 20 || cls === 21 || cls === 23;
       if (ring === 1)
         return hasR2
@@ -520,9 +530,11 @@ export class Forests {
         .includes('casters');
       const ringCasts =
         !ablateCasters &&
-        (pool.cls < TREE_SPECIES_COUNT ? true : pool.cls < 15 ? false : true);
+        (pool.cls < TREE_SPECIES_COUNT ? true : pool.cls < 16 ? false : true);
       const crownDensity =
-        pool.cls < TREE_SPECIES_COUNT ? CROWN_SHADOW_DENSITY[pool.cls] ?? 0 : 0;
+        pool.cls < TREE_SPECIES_COUNT
+          ? (CROWN_SHADOW_DENSITY[pool.cls] ?? 0) * (lib.treeCoverage[pool.cls] ?? 1)
+          : 0;
       // fit the shadow proxy to THIS pool's real extents (R1 union bbox)
       let poolDims: CrownDims | null = null;
       if (crownDensity > 0) {
@@ -562,7 +574,7 @@ export class Forests {
           ? pool.cls === 5
             ? { k: 0.45, freq: 0.8, h0: 6 }
             : { k: 1, freq: 1, h0: 6 }
-          : pool.cls < 15
+          : pool.cls < 16
             ? { k: 1, freq: 1.8, h0: 0.9 }
             : undefined;
       for (const { ring, parts } of rings) {
@@ -576,6 +588,7 @@ export class Forests {
             compact: this.compact,
             groupBase: offsets[g] ?? 0,
             fade: fadeFor(pool.cls, ring),
+            heroSelected: pool.cls < TREE_SPECIES_COUNT && ring === 1 ? heroSelected : undefined,
             wind: windBind,
           });
           this.patchGI(mat);
@@ -600,7 +613,12 @@ export class Forests {
           // only feed the two near cascades (~15 ms → ~7 ms caster raster).
           const cascadeMax =
             pool.cls < TREE_SPECIES_COUNT && ring === 1 && crownDensity > 0 ? 2 : CASCADES;
-          if (part.castShadow && ringCasts && !proxyOwnsRing) {
+          // Shadow detail is independent of the visual Hero quota. All near
+          // trees use the same R1 caster + crown core: crossing rank 5/6 must
+          // not make a whole shadow core appear/disappear, or rasterize the
+          // 600k-triangle Hero again for every cascade.
+          const heroVisualOnly = pool.cls < TREE_SPECIES_COUNT && ring === 0;
+          if (part.castShadow && ringCasts && !proxyOwnsRing && !heroVisualOnly) {
             for (let c = 0; c < cascadeMax; c++) {
               const cg = casterGroupOf(c, pool.cls, pool.variant, ring);
               const cmat = part.make();
@@ -743,6 +761,32 @@ export class Forests {
       });
     };
 
+    // Atomic insertion retains the nearest K identities, independent of GPU
+    // invocation order. Unlike first-come append, this does not swap arbitrary
+    // Hero trees between frames; overflow always retains a complete R1 tree.
+    const clearHeroK = Fn(() => {
+      atomicStore(heroKeys.element(instanceIndex), uint(HERO_EMPTY_KEY));
+    })().compute(TREE_POOL_COUNT * CAP_HERO);
+    clearHeroK.setName('vegHeroClear');
+    const selectHeroK = Fn(() => {
+      const i = instanceIndex;
+      If(i.greaterThanEqual(this.scatter.trees.count), () => { Return(); });
+      const a = this.scatter.trees.bufA.element(i) as unknown as NV4;
+      const b = this.scatter.trees.bufB.element(i) as unknown as NV4;
+      const dist = a.xyz.sub(camU).length();
+      If(dist.greaterThanEqual(R0_FAR + BAND0), () => { Return(); });
+      const cls = b.w.div(8).floor();
+      const variant = b.w.sub(cls.mul(8));
+      const pool = cls.mul(4).add(variant).toUint();
+      const bucket = dist.div(R0_FAR + BAND0).mul(HERO_DISTANCE_STEPS).floor().toUint();
+      const carry = bucket.shiftLeft(HERO_SLOT_BITS).bitOr(i).toVar();
+      for (let k = 0; k < CAP_HERO; k++) {
+        const previous = (atomicMin(heroKeys.element(pool.mul(CAP_HERO).add(k)), carry) as unknown as NU).toVar();
+        carry.assign(previous.greaterThan(carry).select(previous, carry));
+      }
+    })().compute(Math.max(this.scatter.trees.count, 1));
+    selectHeroK.setName('vegHeroSelect');
+
     const makeCull = (
       layer: ScatterLayer,
       kind: 'trees' | 'under' | 'extras',
@@ -803,12 +847,20 @@ export class Forests {
 
         if (kind === 'trees') {
           const pool = cls.mul(4).add(variant).toInt();
+          const hasHero = uint(0).toVar();
+          If(dist.lessThan(R0_FAR + BAND0), () => {
+            for (let k = 0; k < CAP_HERO; k++) {
+              const key = atomicLoad(heroKeys.element(pool.mul(CAP_HERO).add(k))) as unknown as NU;
+              If(key.bitAnd(HERO_SLOT_MASK).equal(i), () => { hasHero.assign(1); });
+            }
+          });
+          heroSelected.element(i).assign(hasHero);
           If(visMain.greaterThan(0.5), () => {
-            If(dist.lessThan(R0_FAR + BAND0), () => {
+            If(hasHero.equal(1), () => {
               appendTo(pool.add(HERO_START) as unknown as NI, i as unknown as NU);
             });
             If(
-              dist.greaterThanEqual(R0_FAR - BAND0).and(dist.lessThan(R1_FAR + BAND1)),
+              hasHero.equal(0).or(dist.greaterThanEqual(R0_FAR - BAND0)).and(dist.lessThan(R1_FAR + BAND1)),
               () => {
                 appendTo(pool.mul(2) as unknown as NI, i as unknown as NU);
               },
@@ -823,19 +875,12 @@ export class Forests {
               appendTo(cls.add(IMPOSTOR_START).toInt() as unknown as NI, i as unknown as NU);
             });
           });
-          // casters per cascade — same ring choice as the main view so the
-          // shadow silhouette matches the rendered crown
+          // R1 shadow silhouette is shared by Hero and its overflow fallback.
           for (let c = 0; c < CASCADES; c++) {
             const base = MAIN_GROUPS + c * CASC_LOCALS;
             If(inCascade(c, center, rad).greaterThan(0.5), () => {
-              If(dist.lessThan(R0_FAR + BAND0), () => {
-                appendTo(
-                  pool.add(base + CASC_HERO_START) as unknown as NI,
-                  i as unknown as NU,
-                );
-              });
               If(
-                dist.greaterThanEqual(R0_FAR - BAND0).and(dist.lessThan(R1_FAR + BAND1)),
+                dist.lessThan(R1_FAR + BAND1),
                 () => {
                   appendTo(pool.mul(2).add(base) as unknown as NI, i as unknown as NU);
                 },
@@ -922,6 +967,8 @@ export class Forests {
 
     this.kernels = [
       clearK,
+      clearHeroK,
+      selectHeroK,
       makeCull(this.scatter.trees, 'trees'),
       makeCull(this.scatter.understory, 'under'),
       makeCull(this.scatter.extras, 'extras'),

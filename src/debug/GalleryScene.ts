@@ -49,7 +49,12 @@ import {
 } from '../vegetation/GroundCover';
 import { buildRock, type RockPreset } from '../vegetation/RockBuilder';
 import { TREE_SPECIES } from '../vegetation/Species';
+import { seasonalFoliageStyle } from '../vegetation/Seasons';
 import { buildTree } from '../vegetation/TreeBuilder';
+import {
+  barkProfileForTier,
+  vegetationSurfaceProfile,
+} from '../vegetation/VegetationProfiles';
 import {
   captureImpostor,
   impostorPreviewMaterial,
@@ -166,7 +171,7 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
     if (!sp.foliage) continue;
     atlases.set(
       sp.id,
-      await captureFoliageAtlas(engine.renderer, sp, seed.rng(`cards/${sp.id}`)),
+      await captureFoliageAtlas(engine.renderer, sp, seed.rng(`cards/${sp.id}`), seasonalFoliageStyle(sp, params.season)),
     );
   }
 
@@ -215,6 +220,7 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
       await new Promise((r) => setTimeout(r, 0));
       const rng = seed.rng(`tree/${sp.id}/${vi}`);
       const built = buildTree(sp, rng);
+      const surface = vegetationSurfaceProfile(sp.id);
       totalTris += built.stats.tris;
       const at = exhibit(
         x,
@@ -223,16 +229,19 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
         `seed ${vi} · ${(built.stats.tris / 1000).toFixed(0)}k tris · ${built.stats.height.toFixed(1)} m`,
       );
       const barkTex = barks.get(sp.barkLayer) as BarkTextures;
-      const barkMesh = new Mesh(built.bark, barkTexturedMaterial(barkTex));
+      const barkMesh = new Mesh(
+        built.bark,
+        barkTexturedMaterial(barkTex, barkProfileForTier(surface, 'hero')),
+      );
       barkMesh.position.set(at.x, 0.42, at.z);
       barkMesh.castShadow = true;
       barkMesh.receiveShadow = true;
       engine.scene.add(barkMesh);
       const atlas = atlases.get(sp.id);
-      if (built.foliage && atlas) {
+      if (built.foliage && atlas && seasonalFoliageStyle(sp, params.season).coverage > 0) {
         const folMesh = new Mesh(
           built.foliage,
-          foliageCardMaterial(atlas, { color: sp.foliageColor }),
+          foliageCardMaterial(atlas, { color: sp.foliageColor }, surface.leaf),
         );
         folMesh.position.copy(barkMesh.position);
         folMesh.castShadow = true;
@@ -313,7 +322,10 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
     engine.scene.add(m);
     const vineRng = seed.rng('cliff/vines');
     const vines = buildVines(vineRng, 5.2, 4.2, 9);
-    const stemMat = barkTexturedMaterial(barks.get(4) as BarkTextures);
+    const stemMat = barkTexturedMaterial(
+      barks.get(4) as BarkTextures,
+      barkProfileForTier(vegetationSurfaceProfile('karst'), 'near'),
+    );
     const vs = new Mesh(vines.stems, stemMat);
     vs.position.set(71.8, 7.6, RZ + 1.7);
     vs.castShadow = true;
@@ -322,7 +334,11 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
     if (hazelAtlas) {
       const vl = new Mesh(
         vines.leaves,
-        foliageCardMaterial(hazelAtlas, { color: { r: 0.05, g: 0.12, b: 0.035, hueVar: 0.25 } }),
+        foliageCardMaterial(
+          hazelAtlas,
+          { color: { r: 0.05, g: 0.12, b: 0.035, hueVar: 0.25 } },
+          vegetationSurfaceProfile('bushHazel').leaf,
+        ),
       );
       vl.position.copy(vs.position);
       vl.castShadow = true;
@@ -333,7 +349,11 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
       for (let i = 0; i < 2; i++) {
         const lf = new Mesh(
           buildFern(seed.rng(`cliff/fern${i}`)),
-          foliageCardMaterial(fernAtlas2, { color: FERN_CAPTURE.foliageColor }),
+          foliageCardMaterial(
+            fernAtlas2,
+            { color: FERN_CAPTURE.foliageColor },
+            vegetationSurfaceProfile('fern').leaf,
+          ),
         );
         lf.position.set(70.4 + i * 2.2, 1.5 + i * 1.3, RZ + 1.75 - i * 0.35);
         lf.castShadow = true;
@@ -418,7 +438,11 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
       for (let i = 0; i < 3; i++) {
         const fern = new Mesh(
           buildFern(seed.rng(`fern/${i}`)),
-          foliageCardMaterial(fernAtlas, { color: FERN_CAPTURE.foliageColor }),
+          foliageCardMaterial(
+            fernAtlas,
+            { color: FERN_CAPTURE.foliageColor },
+            vegetationSurfaceProfile('fern').leaf,
+          ),
         );
         fern.position.set(-12 + i * 3, 0.02, GZ + (i % 2));
         fern.castShadow = true;
@@ -452,14 +476,24 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
     let sx = 26;
     for (const sp of UNDERSTORY_SPECIES) {
       const shrub = buildShrub(sp, seed.rng(`shrub/${sp.id}`));
-      const bm = new Mesh(shrub.bark, barkTexturedMaterial(barks.get(sp.barkLayer) as BarkTextures));
+      const surface = vegetationSurfaceProfile(sp.id);
+      const bm = new Mesh(
+        shrub.bark,
+        barkTexturedMaterial(
+          barks.get(sp.barkLayer) as BarkTextures,
+          barkProfileForTier(surface, 'near'),
+        ),
+      );
       bm.position.set(sx, 0, GZ);
       bm.castShadow = true;
       bm.receiveShadow = true;
       engine.scene.add(bm);
       const at = atlases.get(sp.id);
       if (shrub.foliage && at) {
-        const fm = new Mesh(shrub.foliage, foliageCardMaterial(at, { color: sp.foliageColor }));
+        const fm = new Mesh(
+          shrub.foliage,
+          foliageCardMaterial(at, { color: sp.foliageColor }, surface.leaf),
+        );
         fm.position.copy(bm.position);
         fm.castShadow = true;
         fm.receiveShadow = true;
@@ -473,11 +507,12 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
   // ---- dead row: logs (3 decay states), stumps --------------------------------
   ctx.progress(0.95, 'gallery: deadfall');
   const DZ = ROW_Z.dead;
-  const spruceBark = barks.get(0) as BarkTextures;
+  const deadBark = barks.get(5) as BarkTextures;
+  const deadProfile = barkProfileForTier(vegetationSurfaceProfile('snag'), 'near');
   const decays: DecayState[] = ['fresh', 'mossy', 'rotten'];
   for (let i = 0; i < decays.length; i++) {
     const log = buildLog(seed.rng(`log/${i}`), decays[i] as DecayState);
-    const m = new Mesh(log.geometry, deadwoodMaterial(spruceBark));
+    const m = new Mesh(log.geometry, deadwoodMaterial(deadBark, undefined, deadProfile));
     m.position.set(-22 + i * 9, 0, DZ);
     // keep logs near-perpendicular to the row so they present their length
     m.rotation.y = (seed.rng(`logr/${i}`).float() - 0.5) * 0.8;
@@ -499,7 +534,7 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
   }
   for (let i = 0; i < 2; i++) {
     const st = buildStump(seed.rng(`stump/${i}`));
-    const m = new Mesh(st.geometry, deadwoodMaterial(spruceBark));
+    const m = new Mesh(st.geometry, deadwoodMaterial(deadBark, undefined, deadProfile));
     m.position.set(8 + i * 6, 0, DZ);
     m.castShadow = true;
     m.receiveShadow = true;
@@ -507,57 +542,90 @@ export async function buildGalleryScene(ctx: WorldContext): Promise<void> {
   }
   exhibit(11, DZ + 2.5, 'Stumps ×2', 'root flare, jagged top', { pedestal: false });
 
-  // ---- hero row: mesh-foliage hero trees (>=100k tris floor) ------------------
+  // ---- hero row: same-seed baseline vs complete ancient-oak surface -----------
   ctx.progress(0.96, 'gallery: hero trees');
   await new Promise((r) => setTimeout(r, 0));
   {
     const HZ = ROW_Z.hero;
-    const heroSpecs = [TREE_SPECIES[0], TREE_SPECIES[2]];
-    let hx = -14;
-    for (const sp of heroSpecs) {
-      if (!sp) continue;
-      const built = buildTree(sp, seed.rng(`hero/${sp.id}`), { foliageMode: 'hybrid' });
-      const at = exhibit(hx, HZ, `HERO ${sp.label}`, `${(built.stats.tris / 1000).toFixed(0)}k tris (mesh foliage)`);
-      const bm = new Mesh(built.bark, barkTexturedMaterial(barks.get(sp.barkLayer) as BarkTextures));
+    const sp = TREE_SPECIES.find((candidate) => candidate.id === 'oak');
+    if (sp) {
+      const surface = vegetationSurfaceProfile(sp.id);
+      const variants = [
+        { x: -16, enhanced: false, title: 'OAK · BASELINE' },
+        { x: 16, enhanced: true, title: 'OAK · HERO PBR + MICRO' },
+      ];
+      for (const variant of variants) {
+        const built = buildTree(sp, seed.rng('hero/oak-comparison'), {
+          foliageMode: seasonalFoliageStyle(sp, params.season).coverage > 0 ? 'hybrid' : 'cards',
+          heroSurface: variant.enhanced,
+          hero: { cardTarget: 1800, meshAnchorTarget: 320, barkK: 0.8 },
+        });
+        const at = exhibit(
+          variant.x,
+          HZ,
+          variant.title,
+          `${(built.stats.tris / 1000).toFixed(0)}k tris · ${variant.enhanced ? surface.id : 'legacy tubes'}`,
+        );
+        const barkMat = variant.enhanced
+          ? barkTexturedMaterial(
+              barks.get(sp.barkLayer) as BarkTextures,
+              barkProfileForTier(surface, 'hero'),
+            )
+          : barkTexturedMaterial(barks.get(sp.barkLayer) as BarkTextures);
+        const bm = new Mesh(built.bark, barkMat);
       bm.position.set(at.x, 0.42, at.z);
       bm.castShadow = true;
       bm.receiveShadow = true;
       engine.scene.add(bm);
       const heroAtlas = atlases.get(sp.id);
-      if (built.foliage && heroAtlas) {
-        const fm = new Mesh(built.foliage, foliageCardMaterial(heroAtlas, { color: sp.foliageColor }));
+      if (built.foliage && heroAtlas && seasonalFoliageStyle(sp, params.season).coverage > 0) {
+          const fm = new Mesh(
+            built.foliage,
+            foliageCardMaterial(
+              heroAtlas,
+              { color: sp.foliageColor },
+              variant.enhanced ? surface.leaf : undefined,
+            ),
+          );
         fm.position.copy(bm.position);
         fm.castShadow = true;
         fm.receiveShadow = true;
         engine.scene.add(fm);
       }
       if (built.foliageMesh) {
-        const fm2 = new Mesh(built.foliageMesh, foliageMaterial({ color: sp.foliageColor }));
+          const fm2 = new Mesh(
+            built.foliageMesh,
+            foliageMaterial(
+              { color: sp.foliageColor },
+              variant.enhanced ? surface.leaf : undefined,
+              seasonalFoliageStyle(sp, params.season),
+            ),
+          );
         fm2.position.copy(bm.position);
         fm2.castShadow = true;
         fm2.receiveShadow = true;
         engine.scene.add(fm2);
       }
-      engine.stats.counters[`hero.${sp.id}`] = built.stats.tris;
-      hx += 28;
+        engine.stats.counters[`hero.oak.${variant.enhanced ? 'enhanced' : 'baseline'}`] = built.stats.tris;
+      }
     }
-    // tree-base dressing: mushroom cluster + litter ring at the beech hero
+    // tree-base dressing around the enhanced oak
     const mrng = seed.rng('fungi');
     for (let i = 0; i < 6; i++) {
       const mush = new Mesh(buildMushroom(mrng.fork(String(i)), 'cap'), mushroomMaterial());
       const a2 = mrng.float() * 6.28;
       const rr = 0.5 + mrng.float() * 1.3;
-      mush.position.set(14 + Math.cos(a2) * rr, 0.42, HZ + Math.sin(a2) * rr);
+      mush.position.set(16 + Math.cos(a2) * rr, 0.42, HZ + Math.sin(a2) * rr);
       mush.castShadow = true;
       engine.scene.add(mush);
     }
-    const beechAtlas2 = atlases.get('beech');
-    if (beechAtlas2) {
+    const oakAtlas = atlases.get('oak');
+    if (oakAtlas) {
       const lg = new PlaneGeometry(0.16, 0.16);
       lg.rotateX(-Math.PI / 2);
-      const li = new InstancedMesh(lg, litterMaterial(beechAtlas2), 160);
+      const li = new InstancedMesh(lg, litterMaterial(oakAtlas), 160);
       scatterInstances(li, seed.rng('hero/litter'), 5, 0.04, [0.8, 2.0], true);
-      li.position.set(14, 0.44, HZ);
+      li.position.set(16, 0.44, HZ);
       engine.scene.add(li);
     }
   }

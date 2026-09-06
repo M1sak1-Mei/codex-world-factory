@@ -9,8 +9,12 @@ export const LANDSCAPE_PROFILE_IDS = [
   'balanced',
   'wild',
   'settled',
+  'paved',
   'arid',
   'alpine',
+  'oasis',
+  'coastal',
+  'moorland',
 ] as const;
 
 export type LandscapeProfileId = (typeof LANDSCAPE_PROFILE_IDS)[number];
@@ -28,6 +32,7 @@ export const LANDSCAPE_TAGS = [
   'grass',
   'shrubs',
   'flowers',
+  'cacti',
   'cobble',
   'concrete',
 ] as const;
@@ -54,12 +59,14 @@ export interface LandscapeEcologyControls {
   grass: number;
   shrubs: number;
   flowers: number;
+  cacti: number;
 }
 
 export interface LandscapeSurfaceControls {
   sand: number;
   cobble: number;
   concrete: number;
+  layout: 'none' | 'organic' | 'paved-network';
 }
 
 export interface ResolvedLandscapeProfile {
@@ -97,8 +104,9 @@ const LEGACY: LandscapePreset = {
     grass: 1,
     shrubs: 1,
     flowers: 1,
+    cacti: 0,
   },
-  surfaces: { sand: 0, cobble: 0, concrete: 0 },
+  surfaces: { sand: 0, cobble: 0, concrete: 0, layout: 'none' },
 };
 
 const PRESETS: Readonly<Record<LandscapeProfileId, LandscapePreset>> = {
@@ -123,8 +131,9 @@ const PRESETS: Readonly<Record<LandscapeProfileId, LandscapePreset>> = {
       grass: 1.12,
       shrubs: 1.1,
       flowers: 1.18,
+      cacti: 0.24,
     },
-    surfaces: { sand: 0.38, cobble: 0.72, concrete: 0.32 },
+    surfaces: { sand: 0.38, cobble: 0.72, concrete: 0.32, layout: 'organic' },
   },
   wild: {
     noise: {
@@ -146,8 +155,9 @@ const PRESETS: Readonly<Record<LandscapeProfileId, LandscapePreset>> = {
       grass: 1.08,
       shrubs: 1.25,
       flowers: 0.9,
+      cacti: 0.08,
     },
-    surfaces: { sand: 0.18, cobble: 0, concrete: 0 },
+    surfaces: { sand: 0.18, cobble: 0, concrete: 0, layout: 'none' },
   },
   settled: {
     noise: {
@@ -169,8 +179,33 @@ const PRESETS: Readonly<Record<LandscapeProfileId, LandscapePreset>> = {
       grass: 1.22,
       shrubs: 0.72,
       flowers: 1.25,
+      cacti: 0.04,
     },
-    surfaces: { sand: 0.2, cobble: 1.25, concrete: 1.1 },
+    surfaces: { sand: 0.2, cobble: 1.25, concrete: 1.1, layout: 'organic' },
+  },
+  paved: {
+    noise: {
+      macroScale: 1.35,
+      hills: 0.34,
+      plains: 1.55,
+      basins: 0.2,
+      mountains: 0.12,
+      detailScale: 1.4,
+      detailAmplitude: 0.38,
+      warp: 0.28,
+    },
+    ecology: {
+      forest: 0.45,
+      meadow: 0.9,
+      wetland: 0.3,
+      desert: 0.08,
+      snow: 0,
+      grass: 0.82,
+      shrubs: 0.32,
+      flowers: 0.55,
+      cacti: 0.02,
+    },
+    surfaces: { sand: 0.08, cobble: 1.6, concrete: 1.45, layout: 'paved-network' },
   },
   arid: {
     noise: {
@@ -192,8 +227,9 @@ const PRESETS: Readonly<Record<LandscapeProfileId, LandscapePreset>> = {
       grass: 0.24,
       shrubs: 0.52,
       flowers: 0.14,
+      cacti: 1.45,
     },
-    surfaces: { sand: 1.55, cobble: 0.25, concrete: 0.12 },
+    surfaces: { sand: 1.55, cobble: 0.25, concrete: 0.12, layout: 'organic' },
   },
   alpine: {
     noise: {
@@ -215,8 +251,81 @@ const PRESETS: Readonly<Record<LandscapeProfileId, LandscapePreset>> = {
       grass: 0.68,
       shrubs: 0.72,
       flowers: 0.5,
+      cacti: 0,
     },
-    surfaces: { sand: 0, cobble: 0.12, concrete: 0 },
+    surfaces: { sand: 0, cobble: 0.12, concrete: 0, layout: 'organic' },
+  },
+  oasis: {
+    noise: {
+      macroScale: 1.12,
+      hills: 0.62,
+      plains: 1.08,
+      basins: 1.18,
+      mountains: 0.4,
+      detailScale: 0.9,
+      detailAmplitude: 0.82,
+      warp: 0.62,
+    },
+    ecology: {
+      forest: 0.22,
+      meadow: 0.38,
+      wetland: 1.18,
+      desert: 1.28,
+      snow: 0,
+      grass: 0.42,
+      shrubs: 0.58,
+      flowers: 0.32,
+      cacti: 1.35,
+    },
+    surfaces: { sand: 1.35, cobble: 0.08, concrete: 0, layout: 'none' },
+  },
+  coastal: {
+    noise: {
+      macroScale: 1.08,
+      hills: 0.72,
+      plains: 0.92,
+      basins: 1.1,
+      mountains: 0.38,
+      detailScale: 0.94,
+      detailAmplitude: 0.86,
+      warp: 1.18,
+    },
+    ecology: {
+      forest: 0.68,
+      meadow: 1.02,
+      wetland: 1.42,
+      desert: 0.16,
+      snow: 0,
+      grass: 1.08,
+      shrubs: 0.9,
+      flowers: 0.8,
+      cacti: 0.04,
+    },
+    surfaces: { sand: 1.18, cobble: 0.18, concrete: 0, layout: 'none' },
+  },
+  moorland: {
+    noise: {
+      macroScale: 0.92,
+      hills: 1.2,
+      plains: 0.56,
+      basins: 0.92,
+      mountains: 0.66,
+      detailScale: 0.8,
+      detailAmplitude: 1.14,
+      warp: 1.26,
+    },
+    ecology: {
+      forest: 0.34,
+      meadow: 1.18,
+      wetland: 1.32,
+      desert: 0,
+      snow: 0.46,
+      grass: 1.18,
+      shrubs: 1.28,
+      flowers: 0.56,
+      cacti: 0,
+    },
+    surfaces: { sand: 0.12, cobble: 0.08, concrete: 0, layout: 'none' },
   },
 };
 
@@ -267,6 +376,11 @@ function includeTag(profile: LandscapePreset, tag: LandscapeTag): void {
     case 'grass': profile.ecology.grass = Math.max(profile.ecology.grass, 0.9); break;
     case 'shrubs': profile.ecology.shrubs = Math.max(profile.ecology.shrubs, 0.9); break;
     case 'flowers': profile.ecology.flowers = Math.max(profile.ecology.flowers, 0.9); break;
+    case 'cacti':
+      profile.ecology.cacti = Math.max(profile.ecology.cacti, 1);
+      profile.ecology.desert = Math.max(profile.ecology.desert, 0.8);
+      profile.surfaces.sand = Math.max(profile.surfaces.sand, 0.65);
+      break;
     case 'cobble': profile.surfaces.cobble = Math.max(profile.surfaces.cobble, 1); break;
     case 'concrete': profile.surfaces.concrete = Math.max(profile.surfaces.concrete, 1); break;
   }
@@ -289,6 +403,7 @@ function excludeTag(profile: LandscapePreset, tag: LandscapeTag): void {
     case 'grass': profile.ecology.grass = 0; break;
     case 'shrubs': profile.ecology.shrubs = 0; break;
     case 'flowers': profile.ecology.flowers = 0; break;
+    case 'cacti': profile.ecology.cacti = 0; break;
     case 'cobble': profile.surfaces.cobble = 0; break;
     case 'concrete': profile.surfaces.concrete = 0; break;
   }

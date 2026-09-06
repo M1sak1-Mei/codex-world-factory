@@ -39,7 +39,8 @@ import {
 } from '../gpu/passes/NoiseBake';
 import { sunU } from './VegMaterials';
 import { zoneMasks, type MacroParams } from '../world/MacroMap';
-import { LAKE_LEVEL, WORLD_HALF, WORLD_SIZE } from '../world/WorldConst';
+import { WORLD_HALF, WORLD_SIZE } from '../world/WorldConst';
+import { terrainSurfacePalette } from '../world/TerrainSurfacePalette';
 
 export interface TerrainShadingInputs {
   /** rgba16f: xyz world normal, w slope */
@@ -54,6 +55,8 @@ export interface TerrainShadingInputs {
   noiseA: StorageTexture;
   noiseB: StorageTexture;
   mp: MacroParams;
+  /** Actual rendered water surface; dry cells are below the bed, not fill W. */
+  localWaterY: NF;
   /** far shell: cheaper bands + far-detail synthesis */
   far: boolean;
   /**
@@ -138,7 +141,8 @@ export function buildTerrainShading(inp: TerrainShadingInputs): TerrainShading {
         wxz.abs().x.max(wxz.abs().y),
       )
     : float(0);
-  const snowProc = smoothstep(950, 1300, h.add(valS(620, 0.23, 0.57).mul(140)));
+  const snowProc = smoothstep(950, 1300, h.add(valS(620, 0.23, 0.57).mul(140)))
+    .mul(Math.min(1, inp.mp.landscape.ecology.snow));
   const vegProc = smoothstep(0.55, 0.28, slope).mul(smoothstep(1350, 900, h));
   const rockProc = smoothstep(0.55, 0.95, slope);
   const snowField = mix(bio.g, snowProc, outsideK);
@@ -179,7 +183,8 @@ export function buildTerrainShading(inp: TerrainShadingInputs): TerrainShading {
   // pale palettes washed the whole massif into cream at golden hour
   const alpRock = mix(vec3(0.16, 0.135, 0.125), vec3(0.38, 0.26, 0.18), strata);
   const karstRock = mix(vec3(0.3, 0.3, 0.29), vec3(0.5, 0.48, 0.44), strata);
-  const genericRock = mix(vec3(0.26, 0.245, 0.225), vec3(0.42, 0.39, 0.35), strata);
+  const palette = terrainSurfacePalette(inp.mp.landscape.id);
+  const genericRock = mix(vec3(...palette.rockLow), vec3(...palette.rockHigh), strata);
   let rockCol = mix(genericRock, karstRock, zm.tKarst);
   rockCol = mix(rockCol, alpRock, zm.tAlp.mul(0.85));
   // iron-oxide bands: dark rust layers at noise-chosen elevations (refs show
@@ -193,7 +198,7 @@ export function buildTerrainShading(inp: TerrainShadingInputs): TerrainShading {
   // cavity dirt: concave-ish micro band darkening
   rockCol = rockCol.mul(meso.mul(0.22).add(0.89)).mul(micro.mul(0.1).add(0.95));
 
-  const scree = vec3(0.36, 0.345, 0.325).mul(meso.mul(0.35).add(0.78));
+  const scree = vec3(...palette.scree).mul(meso.mul(0.35).add(0.78));
   const soil = mix(vec3(0.155, 0.12, 0.085), vec3(0.24, 0.195, 0.135), meso).mul(
     micro.mul(0.2).add(0.9),
   );
@@ -313,7 +318,10 @@ export function buildTerrainShading(inp: TerrainShadingInputs): TerrainShading {
   col = mix(col, wallGreen, wallVeg);
 
   // wet darkening: river margins, lake shores, marshes
-  const shoreWet = smoothstep(LAKE_LEVEL + 2.5, LAKE_LEVEL + 0.3, h);
+  // Dry cells sit ~2m below the bed. Keep the fringe narrower than that
+  // sentinel gap so ordinary slopes do not become wet at every altitude.
+  const shoreWet = smoothstep(1.25, 0.12, h.sub(inp.localWaterY))
+    .mul(smoothstep(0.95, 0.3, slope));
   const wet = clamp(
     smoothstep(0.55, 0.95, moisture).mul(0.5).add(riverDepth.mul(2)).add(shoreWet.mul(0.6)),
     0,

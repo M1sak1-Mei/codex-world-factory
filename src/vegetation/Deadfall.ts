@@ -9,6 +9,7 @@ import type { BufferGeometry } from 'three';
 import type { Rng } from '../core/Seed';
 import { MeshGrower, tubeForBranch } from './TubeMesh';
 import type { SkelBranch } from './VegTypes';
+import { SNAG_SURFACE } from './VegetationProfiles';
 
 export type DecayState = 'fresh' | 'mossy' | 'rotten';
 
@@ -56,6 +57,7 @@ export function buildLog(rng: Rng, decay: DecayState): BuiltDeadfall {
       swayFlexBase: 0,
       swayFlexTip: 0,
       hue: rng.float() * 2 - 1,
+      surface: SNAG_SURFACE.hero.bark,
     },
     rng,
   );
@@ -93,6 +95,7 @@ export function buildStump(rng: Rng): BuiltDeadfall {
       swayFlexBase: 0,
       swayFlexTip: 0,
       hue: rng.float() * 2 - 1,
+      surface: SNAG_SURFACE.hero.bark,
     },
     rng,
   );

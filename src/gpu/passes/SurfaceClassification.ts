@@ -32,7 +32,9 @@ import type { FloatBuffer } from './HeightSynthesis';
 
 export interface SurfaceClassificationOpts {
   res: number;
+  waterRes: number;
   mp: MacroParams;
+  waterY: FloatBuffer;
   normalTex: StorageTexture;
   fieldsTex: StorageTexture;
   biomeTex: StorageTexture;
@@ -82,7 +84,7 @@ export async function runSurfaceClassification(
       .mul(0.5)
       .add(0.5);
     const dryness = fields.x.oneMinus().mul(0.74).add(dryNoise.mul(0.42));
-    const lowSlope = smoothstep(0.52, 0.12, slope);
+    const lowSlope = smoothstep(0.12, 0.52, slope).oneMinus();
     const sand = smoothstep(0.56, 0.88, dryness)
       .mul(lowSlope)
       .mul(snow.oneMinus())
@@ -91,10 +93,15 @@ export async function runSurfaceClassification(
       .clamp(0, 1)
       .toVar();
 
-    const waterSafe = smoothstep(0.28, 0.025, fields.z)
-      .mul(smoothstep(0.15, 0.45, h.sub(fields.w)))
-      .clamp(0, 1);
+    // Sample the final render-water buffer, not hydrology fill W or the broad
+    // riverDepth field. Dry waterY cells sit below the bed, so roads remain
+    // continuous across drainage basins and stop only at actual open water.
+    const waterX = x.mul(opts.waterRes).div(res);
+    const waterZ = y.mul(opts.waterRes).div(res);
+    const waterLevel = opts.waterY.element(waterZ.mul(opts.waterRes).add(waterX));
+    const waterSafe = smoothstep(0.08, 0.45, h.sub(waterLevel));
     const cobble = float(0).toVar();
+    const concrete = float(0).toVar();
     for (const path of mp.surfaceLayout.paths) {
       for (let segment = 0; segment < path.points.length - 1; segment++) {
         const a = path.points[segment];
@@ -107,17 +114,18 @@ export async function runSurfaceClassification(
           2.1,
           0.5,
           1,
-        ).mul(1.25);
-        cobble.assign(
-          cobble.max(
-            smoothstep(path.width + 2.5, path.width * 0.62, d.add(edgeNoise))
+        ).mul(path.kind === 'concrete' ? 0.55 : 1.25);
+        const channel = path.kind === 'concrete' ? concrete : cobble;
+        channel.assign(
+          channel.max(
+            smoothstep(path.width * 0.62, path.width + 2.5, d.add(edgeNoise))
+              .oneMinus()
               .mul(path.strength),
           ),
         );
       }
     }
 
-    const concrete = float(0).toVar();
     for (const pad of mp.surfaceLayout.pads) {
       const ca = Math.cos(pad.rotation);
       const sa = Math.sin(pad.rotation);
@@ -128,12 +136,18 @@ export async function runSurfaceClassification(
       const inside = min(max(box.x, box.y), 0);
       const signedDistance = outside.add(inside);
       concrete.assign(
-        concrete.max(smoothstep(2.4, -1.2, signedDistance).mul(pad.strength)),
+        concrete.max(
+          smoothstep(-1.2, 2.4, signedDistance).oneMinus().mul(pad.strength),
+        ),
       );
     }
 
     cobble.mulAssign(waterSafe);
     concrete.mulAssign(waterSafe);
+    // Materials are exclusive at junctions: concrete is the authored
+    // intersection/plaza material and therefore replaces cobble instead of
+    // blending both channels over the same texels.
+    cobble.mulAssign(concrete.oneMinus());
     const artificial = cobble.max(concrete).clamp(0, 1);
     sand.mulAssign(artificial.oneMinus());
     textureStore(

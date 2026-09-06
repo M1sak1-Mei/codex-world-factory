@@ -7,6 +7,7 @@ import {
   failLoud,
   installGlobalErrorHooks,
   probeWebGPU,
+  worldGpuLimitFailures,
 } from './core/Diagnostics';
 import { Engine } from './core/Engine';
 import { FlyCamera } from './core/FlyCamera';
@@ -18,6 +19,7 @@ import { buildGalleryScene } from './debug/GalleryScene';
 import { buildSanityScene } from './debug/SanityScene';
 import { buildShadowTestScene } from './debug/ShadowTestScene';
 import { buildTerrainScene } from './debug/TerrainScene';
+import { buildHeroVegetationScene } from './debug/HeroVegetationScene';
 import { buildScene, registerScene, type WorldContext } from './debug/Scenes';
 
 async function boot(): Promise<void> {
@@ -43,6 +45,15 @@ async function boot(): Promise<void> {
     ]);
     return;
   }
+  const limitFailures = worldGpuLimitFailures(diag);
+  if (limitFailures.length > 0) {
+    failLoud('GPU limits are insufficient for the world renderer', [
+      ...limitFailures,
+      '',
+      'Update the browser and GPU driver, then make sure hardware acceleration is enabled.',
+    ]);
+    return;
+  }
   // eslint-disable-next-line no-console
   console.log('[laas] webgpu ok\n' + describeDiagnostics(diag).join('\n'));
 
@@ -60,6 +71,7 @@ async function boot(): Promise<void> {
   registerScene('sanity', buildSanityScene);
   registerScene('terrain', buildTerrainScene);
   registerScene('gallery', buildGalleryScene);
+  registerScene('veghero', buildHeroVegetationScene);
   registerScene('shadowtest', buildShadowTestScene);
   // 'world' becomes the streamed open world once terrain tiles land.
   registerScene('world', buildTerrainScene);

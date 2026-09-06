@@ -10,7 +10,14 @@
  *   blended to the baked field across the world edge.
  */
 
-import { InstancedMesh, PlaneGeometry, RingGeometry, Mesh, type PerspectiveCamera } from 'three';
+import {
+  DoubleSide,
+  InstancedMesh,
+  PlaneGeometry,
+  RingGeometry,
+  Mesh,
+  type PerspectiveCamera,
+} from 'three';
 import {
   IrradianceNode,
   MeshPhysicalNodeMaterial,
@@ -51,6 +58,10 @@ import { PERIOD_FBM, PERIOD_RID, PERIOD_VAL } from '../gpu/passes/NoiseBake';
 import type { Heightfield } from './Heightfield';
 import { macroTerrain } from './MacroMap';
 import { FAR_RADIUS, WORLD_HALF, WORLD_SIZE } from './WorldConst';
+import {
+  FAR_SHELL_CLIP_INNER,
+  FAR_SHELL_CLIP_OUTER,
+} from './TerrainShell';
 
 const MAX_TILES = 2048;
 const PATCH_SEGS = 64;
@@ -110,6 +121,9 @@ export class TerrainTiles {
     // 'terrain gets too silvery'); rock keeps a modest glint
     const mat = new MeshPhysicalNodeMaterial();
     mat.specularIntensity = 0.35;
+    // Back-facing skirts must still cover a mixed-LOD seam when the viewer is
+    // on the lower side of a steep slope.
+    mat.side = DoubleSide;
     const tile = this.tileBuf.element(instanceIndex);
     const tileOrigin = tile.xy; // world xz of tile center
     const tileSize = tile.z;
@@ -136,7 +150,7 @@ export class TerrainTiles {
     const wpos = mix(wpos0, snapped, morphK);
 
     // instance + object matrices are identity → positionNode is world space
-    const skirtDrop = isSkirt.mul(tileSize.mul(0.045).add(2.5));
+    const skirtDrop = isSkirt.mul(tileSize.mul(0.075).add(5));
     const hSample = hf.sampleHeightFrom(heightBuf, wpos).sub(skirtDrop);
 
     // --- micro-displacement (5×-detail / Pillar A): geometric relief ≤85 m.
@@ -191,6 +205,7 @@ export class TerrainTiles {
     );
 
     const shading = buildTerrainShading({
+      localWaterY: hf.sampleWaterYNearest(positionWorld.xz),
       normalTex: hf.normalTex,
       biomeTex: hf.biomeTex as NonNullable<typeof hf.biomeTex>,
       fieldsTex: hf.fieldsTex as NonNullable<typeof hf.fieldsTex>,
@@ -354,6 +369,7 @@ export class TerrainTiles {
     const farMat = new MeshPhysicalNodeMaterial();
     farMat.specularIntensity = 0.35;
     const fxz = positionLocal.xz;
+    const squareEdge = fxz.abs().x.max(fxz.abs().y);
     const farMacro = macroTerrain(fxz, hf.mp, 'far');
     const baked = hf.sampleHeight(fxz);
     const edgeBlend = clamp(
@@ -379,6 +395,7 @@ export class TerrainTiles {
       .div(eN);
     const farNS = varying(vec4(farNormal, farSlope));
     const farShading = buildTerrainShading({
+      localWaterY: hf.sampleWaterYNearest(positionWorld.xz),
       normalTex: hf.normalTex,
       biomeTex: hf.biomeTex as NonNullable<typeof hf.biomeTex>,
       fieldsTex: hf.fieldsTex as NonNullable<typeof hf.fieldsTex>,
@@ -393,6 +410,15 @@ export class TerrainTiles {
     farMat.normalNode = farShading.normalNode;
     farMat.roughnessNode = farShading.roughnessNode;
     farMat.metalnessNode = float(0);
+    // RingGeometry's circular inner radius used to overlap almost 100 m of
+    // the square world. A hard alpha clip keeps only a narrow boundary stitch,
+    // so the unrelated analytic shell cannot show through an interior crack.
+    farMat.opacityNode = smoothstep(
+      FAR_SHELL_CLIP_INNER,
+      FAR_SHELL_CLIP_OUTER,
+      squareEdge,
+    );
+    farMat.alphaTest = 0.5;
     if (opts.gi && !ablate.has('gi')) {
       const farIrr = opts.gi.irradiance(positionWorld, farShading.worldNormalNode);
       (farMat as unknown as { setupLightMap: () => unknown }).setupLightMap = () =>

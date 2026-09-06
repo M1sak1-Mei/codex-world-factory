@@ -113,6 +113,12 @@ export interface BarkParams {
   roughBase: number;
   roughVar: number;
   normalK: number;
+  /** Shape the main plate lips: lower values make broad, abrupt ridges. */
+  crackSharpness?: number;
+  /** Broken cross-cracks layered over the primary plate boundaries. */
+  secondaryCrack?: number;
+  /** Expands the useful 0..1 height range before packing. */
+  reliefContrast?: number;
 }
 
 export const BARK_TABLE: readonly BarkParams[] = [
@@ -152,6 +158,20 @@ export const BARK_TABLE: readonly BarkParams[] = [
     deep: [0.07, 0.065, 0.06], high: [0.26, 0.25, 0.23], mottle: 0.2,
     roughBase: 0.9, roughVar: 0.06, normalK: 2.2,
   },
+  { // 6 ancient oak: blocky plates, deep vertical furrows, broken cross cracks
+    plates: [13, 4], warp: 0.72, fissureW: 0.28, fissureDepth: 1.08, plateRound: 0.34,
+    micro: 0.18, vertCrack: 0.62, lenticels: 0,
+    deep: [0.025, 0.019, 0.014], high: [0.205, 0.155, 0.105], mottle: 0.24,
+    roughBase: 0.9, roughVar: 0.09, normalK: 4.8,
+    crackSharpness: 0.42, secondaryCrack: 0.52, reliefContrast: 1.16,
+  },
+  { // 7 willow: damp gray-brown rope furrows with short cross splitting
+    plates: [12, 3], warp: 0.9, fissureW: 0.38, fissureDepth: 0.82, plateRound: 0.26,
+    micro: 0.22, vertCrack: 0.48, lenticels: 0,
+    deep: [0.038, 0.034, 0.027], high: [0.19, 0.175, 0.13], mottle: 0.3,
+    roughBase: 0.88, roughVar: 0.08, normalK: 3.6,
+    crackSharpness: 0.5, secondaryCrack: 0.32, reliefContrast: 1.08,
+  },
 ];
 
 export interface BarkTextures {
@@ -174,7 +194,7 @@ function barkHeight(p: BarkParams, uvN: NV2, seedK: number): NF {
   );
   // plates: high in the middle, fissure at edges
   const fissure = pl.edge.div(p.fissureW).clamp(0, 1);
-  let h: NF = fissure.pow(0.65).mul(p.fissureDepth);
+  let h: NF = fissure.pow(p.crackSharpness ?? 0.65).mul(p.fissureDepth);
   h = h.add(pl.f1.mul(p.plateRound));
   if (p.vertCrack > 0) {
     // long wavy vertical cracks: thin valleys in x
@@ -182,8 +202,22 @@ function barkHeight(p: BarkParams, uvN: NV2, seedK: number): NF {
     const crack = cx.fract().sub(0.5).abs().mul(2); // 0 at crack center
     h = h.mul(crack.div(0.22).clamp(0, 1).pow(0.5).mul(p.vertCrack).add(1 - p.vertCrack));
   }
+  if ((p.secondaryCrack ?? 0) > 0) {
+    // Short, interrupted cross cracks prevent the oak from reading as a set
+    // of clean vertical tubes. Tileable low-frequency noise gates each band.
+    const bandY = q.y
+      .mul(Math.max(2, p.plates[1] * 2))
+      .add(pfbm(q.mul(5), 2, 5, seedK + 143).mul(1.7));
+    const band = bandY.fract().sub(0.5).abs().mul(2).div(0.19).clamp(0, 1).pow(0.4);
+    const broken = pnoise(q.mul(8), 8, seedK + 177).smoothstep(0.38, 0.68);
+    const cut = float(1).sub(broken.mul(1 - (p.secondaryCrack ?? 0))).mul(
+      float(1).sub(broken).add(broken.mul(band)),
+    );
+    h = h.mul(cut);
+  }
   h = h.add(pfbm(uvN.mul(24), 3, 24 * P, seedK + 91).sub(0.5).mul(p.micro));
-  return h;
+  const contrast = p.reliefContrast ?? 1;
+  return h.sub(0.35).mul(contrast).add(0.35).clamp(0, 1);
 }
 
 export async function bakeBarkTextures(
@@ -218,13 +252,13 @@ export async function bakeBarkTextures(
     const hy0 = barkHeight(p, uvN.add(vec2(0, -e)), seedK);
     const hy1 = barkHeight(p, uvN.add(vec2(0, e)), seedK);
     const n = vec3(
-      hx0.sub(hx1).mul(p.normalK * 0.5),
-      hy0.sub(hy1).mul(p.normalK * 0.5),
+      hx0.sub(hx1).mul(p.normalK * 18),
+      hy0.sub(hy1).mul(p.normalK * 18),
       float(1),
     ).normalize();
 
     // cavity: darker in crevices + slight top lightening
-    const cavity = h.clamp(0, 1).mul(0.7).add(0.3);
+    const cavity = h.smoothstep(0.08, 0.72).mul(0.88).add(0.12);
     const mott = pnoise(uvN.mul(2), 2, seedK + 201).sub(0.5).mul(p.mottle);
     let albedo: NV3 = mix(
       vec3(p.deep[0], p.deep[1], p.deep[2]),

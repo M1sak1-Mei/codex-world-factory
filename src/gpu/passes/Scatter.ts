@@ -45,7 +45,11 @@ import type { WorldSeed } from '../../core/Seed';
 import type { ScatterExclusionZone } from '../../generation/core/WorldFeature';
 import { scatterExclusionMask } from '../../generation/integrations/ScatterExclusionTSL';
 import type { Heightfield } from '../../world/Heightfield';
-import { LAKE_LEVEL, TREELINE, WORLD_SIZE } from '../../world/WorldConst';
+import { TREELINE, WORLD_SIZE } from '../../world/WorldConst';
+import {
+  TREE_HABITAT_PALETTE, UNDERSTORY_HABITAT_PALETTE, understoryIntensities,
+} from '../../world/HabitatModel';
+import { habitatAt, TSL_HABITAT_MATH } from '../HabitatTSL';
 import { fbm3 } from '../noise/NoiseTSL';
 import type { NF, NI, NU, NV2, NV4 } from '../TSLTypes';
 
@@ -68,6 +72,7 @@ export const enum VegClass {
   FlowerUmbel = 12,
   FlowerBell = 13,
   FlowerDaisy = 14,
+  Cactus = 15,
   // ground extras
   Log = 16,
   Stump = 17,
@@ -206,7 +211,7 @@ interface SiteSamples {
   riverDepth: NF;
   sand: NF;
   artificial: NF;
-  standing: NF; // W − h (standing-water depth)
+  standing: NF; // actual rendered waterY − h; no absolute lake-level gate
   nrmXZ: NV2;
 }
 
@@ -251,7 +256,7 @@ function sampleSite(hf: Heightfield, wpos: NV2): SiteSamples {
     riverDepth: fields.z,
     sand: surface.r,
     artificial: surface.a,
-    standing: fields.w.sub(h),
+    standing: hf.sampleWaterYNearest(wpos).sub(h),
     nrmXZ: vec2(ns.x, ns.z),
   };
 }
@@ -300,13 +305,15 @@ export const CANOPY_RES = 1024;
 export async function buildCanopyMap(
   renderer: Renderer,
   trees: ScatterLayer,
+  seasonalCoverage: readonly number[] = [],
 ): Promise<StorageTexture> {
   const accum = instancedArray(CANOPY_RES * CANOPY_RES, 'uint').toAtomic();
   const texel = WORLD_SIZE / CANOPY_RES; // 4 m
 
   // crown radius (m at scale 1) and skylight opacity per tree class
   const crownR = [2.9, 2.7, 3.8, 2.7, 3.2, 0.9, 4.3, 3.5];
-  const opacity = [0.85, 0.7, 0.9, 0.65, 0.8, 0.12, 0.92, 0.78];
+  const opacity = [0.85, 0.7, 0.9, 0.65, 0.8, 0.12, 0.92, 0.78]
+    .map((value, cls) => value * (seasonalCoverage[cls] ?? 1));
 
   const splatK = Fn(() => {
     const i = instanceIndex;
@@ -410,11 +417,8 @@ export async function runScatter(
     });
     const s = sampleSite(hf, wpos);
 
-    // hard exclusions: open/standing water, river channels, lake shelf
-    If(s.h.lessThan(LAKE_LEVEL + 0.4), () => {
-      Return();
-    });
-    If(s.riverDepth.greaterThan(0.22).or(s.standing.greaterThan(0.3)), () => {
+    // Local water level permits low dry basins and high-altitude lakes alike.
+    If(s.standing.greaterThan(-0.4), () => {
       Return();
     });
     If(s.artificial.greaterThan(0.08), () => {
@@ -429,6 +433,7 @@ export async function runScatter(
       smoothstep(TREELINE - 110, TREELINE + 50, s.h),
     );
     const snowFade = float(1).sub(s.snow.mul(0.85));
+    const habitat = habitatAt(hf, s.sand, s.moisture);
     const accept = dens
       .mul(clumpFloor.add(float(1).sub(clumpFloor).mul(clump)))
       .mul(slopeFade)
@@ -437,6 +442,7 @@ export async function runScatter(
       .mul(s.vegDens.mul(0.85).add(0.15))
       .mul(float(1).sub(s.rockExp.mul(0.65)))
       .mul(hf.mp.landscape.ecology.forest)
+      .mul(habitat.woodland)
       .mul(s.sand.mul(0.95).oneMinus());
     If(cellHash(cell, sT ^ 0x1234f).greaterThanEqual(accept), () => {
       Return();
@@ -444,20 +450,17 @@ export async function runScatter(
 
     // species weights: per-biome table × moisture response
     const m = s.moisture;
-    const w0 = byBiome(s.bioId, [0, 0.6, 0.58, 0.07, 0.05, 0.12]) // spruce
-      .mul(m.mul(0.5).add(0.75));
-    const w1 = byBiome(s.bioId, [0, 0.22, 0.27, 0.02, 0.15, 0]) // pine
-      .mul(float(1.45).sub(m.mul(0.9)));
-    const w2 = byBiome(s.bioId, [0, 0, 0.02, 0.5, 0.42, 0.05]) // beech
-      .mul(m.mul(0.9).add(0.55));
-    const w3 = byBiome(s.bioId, [0, 0.03, 0.08, 0.16, 0.3, 0.55]) // birch
-      .mul(m.mul(0.6).add(0.7));
-    const w4 = byBiome(s.bioId, [0, 0, 0, 0.2, 0, 0]) // karst gnarl
+    const palette = TREE_HABITAT_PALETTE.map((entry) => byBiome(s.bioId, entry.biome)
+      .mul(m.mul(entry.moisture[1]).add(entry.moisture[0])));
+    const w0 = palette[0]!;
+    const w1 = palette[1]!;
+    const w2 = palette[2]!;
+    const w3 = palette[3]!;
+    const w4 = palette[4]! // karst gnarl
       .mul(s.rockExp.mul(1.6).add(0.4));
-    const w5 = byBiome(s.bioId, [0, 0.15, 0.05, 0.05, 0.08, 0.28]); // snag
-    const w6 = byBiome(s.bioId, [0, 0.01, 0.1, 0.5, 0.34, 0.16]) // oak
-      .mul(m.mul(0.55).add(0.65));
-    const w7 = byBiome(s.bioId, [0, 0, 0.02, 0.08, 0.12, 0.72]) // willow
+    const w5 = palette[5]!;
+    const w6 = palette[6]!;
+    const w7 = palette[7]! // willow
       .mul(smoothstep(0.46, 0.9, m).mul(1.25).add(0.04));
 
     const r = cellHash(cell, sT ^ 0x77e1).mul(
@@ -546,10 +549,7 @@ export async function runScatter(
     });
     const s = sampleSite(hf, wpos);
 
-    If(s.h.lessThan(LAKE_LEVEL + 0.35), () => {
-      Return();
-    });
-    If(s.riverDepth.greaterThan(0.2).or(s.standing.greaterThan(0.3)), () => {
+    If(s.standing.greaterThan(-0.16), () => {
       Return();
     });
     If(s.artificial.greaterThan(0.08), () => {
@@ -563,70 +563,67 @@ export async function runScatter(
     const treelineFade = float(1).sub(
       smoothstep(TREELINE - 40, TREELINE + 140, s.h),
     );
-    const accept = dens
+    const habitat = habitatAt(hf, s.sand, s.moisture);
+    const greenAccept = dens
       .mul(slopeFade)
       .mul(treelineFade)
       .mul(float(1).sub(s.snow.mul(0.9)))
       .mul(s.vegDens.mul(0.9).add(0.1))
       .mul(float(1).sub(s.rockExp.mul(0.85)))
       .mul(s.sand.mul(0.94).oneMinus())
+      .mul(habitat.green)
       .mul(Math.max(hf.mp.landscape.ecology.shrubs, hf.mp.landscape.ecology.flowers));
-    If(cellHash(cell, sU ^ 0x2477).greaterThanEqual(accept), () => {
-      Return();
-    });
+    const cactusControl = float(hf.mp.landscape.ecology.cacti);
+    const cactusAccept = habitat.cactus
+      .mul(float(1).sub(s.snow))
+      .mul(slopeFade)
+      .mul(cactusControl)
+      .mul(0.14);
 
     const m = s.moisture;
     const edge = canopy.mul(float(1).sub(canopy)).mul(4); // 1 at clump rims
     const shrubControl = float(hf.mp.landscape.ecology.shrubs);
     const flowerControl = float(hf.mp.landscape.ecology.flowers);
-    const w0 = byBiome(s.bioId, [0, 0.05, 0.15, 0.3, 0.04, 0.1])
+    const palette = UNDERSTORY_HABITAT_PALETTE.map((entry) => byBiome(s.bioId, entry.biome)
+      .mul(m.mul(entry.moisture[1]).add(entry.moisture[0])));
+    const g0 = palette[0]!
       .mul(shrubControl); // hazel
-    const w1 = byBiome(s.bioId, [0, 0, 0.02, 0.12, 0.1, 0.02]) // pink shrub
+    const g1 = palette[1]! // pink shrub
       .mul(edge.mul(1.3).add(0.2))
       .mul(shrubControl);
-    const w2 = byBiome(s.bioId, [0, 0.55, 0.3, 0.02, 0.03, 0]) // juniper
-      .mul(float(1.3).sub(m.mul(0.8)))
+    const g2 = palette[2]! // juniper
       .mul(shrubControl);
-    const w3 = byBiome(s.bioId, [0, 0.1, 0.4, 0.38, 0.03, 0.5]) // fern
-      .mul(m.mul(1.1).add(0.3))
+    const g3 = palette[3]! // fern
+      .mul(smoothstep(0.23, 0.68, m))
       .mul(canopy.mul(1.1).add(0.35))
       .mul(shrubControl);
     const gapK = float(1.25).sub(canopy.mul(0.9));
-    const w4 = byBiome(s.bioId, [0, 0.1, 0.05, 0.06, 0.3, 0.2])
+    const g4 = palette[4]!
       .mul(gapK).mul(flowerControl); // umbel
-    const w5 = byBiome(s.bioId, [0, 0.08, 0.04, 0.06, 0.22, 0.1])
+    const g5 = palette[5]!
       .mul(gapK).mul(flowerControl); // bell
-    const w6 = byBiome(s.bioId, [0, 0.12, 0.04, 0.06, 0.28, 0.08])
+    const g6 = palette[6]!
       .mul(gapK).mul(flowerControl); // daisy
-
-    const r = cellHash(cell, sU ^ 0x59d3).mul(
-      w0.add(w1).add(w2).add(w3).add(w4).add(w5).add(w6),
+    const weights = understoryIntensities(
+      TSL_HABITAT_MATH, [g0, g1, g2, g3, g4, g5, g6], greenAccept,
+      cactusAccept.mul(float(1.15).sub(canopy.mul(0.35))),
     );
-    const cls = int(VegClass.BushHazel).toVar();
-    const acc = w0.toVar();
-    If(r.greaterThan(acc), () => {
-      cls.assign(int(VegClass.BushPink));
-      acc.addAssign(w1);
-      If(r.greaterThan(acc), () => {
-        cls.assign(int(VegClass.Juniper));
-        acc.addAssign(w2);
-        If(r.greaterThan(acc), () => {
-          cls.assign(int(VegClass.Fern));
-          acc.addAssign(w3);
-          If(r.greaterThan(acc), () => {
-            cls.assign(int(VegClass.FlowerUmbel));
-            acc.addAssign(w4);
-            If(r.greaterThan(acc), () => {
-              cls.assign(int(VegClass.FlowerBell));
-              acc.addAssign(w5);
-              If(r.greaterThan(acc), () => {
-                cls.assign(int(VegClass.FlowerDaisy));
-              });
-            });
-          });
-        });
-      });
+    const intensity = weights.reduce((sum, w) => sum.add(w), float(0)).toVar();
+    If(cellHash(cell, sU ^ 0x2477).greaterThanEqual(intensity.min(1)), () => {
+      Return();
     });
+    const r = cellHash(cell, sU ^ 0x59d3).mul(intensity);
+    const cls = int(VegClass.BushHazel).toVar();
+    const cumulative = float(0).toVar();
+    for (let category = 0; category < weights.length; category++) {
+      const weight = weights[category]!;
+      // Explicit nonzero guard also handles an exactly-zero random sample:
+      // disabled categories cannot inherit another category's probability.
+      If(weight.greaterThan(0).and(r.greaterThanEqual(cumulative)), () => {
+        cls.assign(int(VegClass.BushHazel + category));
+      });
+      cumulative.addAssign(weight);
+    }
 
     const h2 = cellHash2(cell, sU ^ 0x71c9);
     const scale = h2.x.pow(1.4).mul(0.7).add(0.6);
@@ -665,10 +662,7 @@ export async function runScatter(
     });
     const s = sampleSite(hf, wpos);
 
-    If(s.h.lessThan(LAKE_LEVEL + 0.3), () => {
-      Return();
-    });
-    If(s.riverDepth.greaterThan(0.3).or(s.standing.greaterThan(0.35)), () => {
+    If(s.standing.greaterThan(-0.12), () => {
       Return();
     });
     If(s.artificial.greaterThan(0.12), () => {
@@ -678,7 +672,8 @@ export async function runScatter(
     const canopy = clumpField(wpos, sT ^ 0x51f3);
     const forestK = byBiome(s.bioId, [0, 0.3, 1, 1, 0.25, 0.6]).mul(
       canopy.mul(0.7).add(0.3),
-    );
+    ).mul(habitatAt(hf, s.sand, s.moisture).woodland)
+      .mul(Math.min(1, hf.mp.landscape.ecology.forest));
     const m = s.moisture;
     const w0 = forestK.mul(0.3).mul(m.mul(0.6).add(0.4)); // log
     const w1 = forestK.mul(0.12); // stump
@@ -784,9 +779,6 @@ export async function runScatter(
       Return();
     });
     const s = sampleSite(hf, wpos);
-    If(s.h.lessThan(LAKE_LEVEL + 0.25), () => {
-      Return();
-    });
     If(s.standing.greaterThan(0.5), () => {
       Return();
     });
@@ -831,7 +823,9 @@ export async function runScatter(
     const branchFlat = float(1).sub(smoothstep(0.45, 0.75, s.slope));
     const branchW = canopy.mul(0.6).mul(
       byBiome(s.bioId, [0, 0.2, 1, 1, 0.3, 0.7]),
-    ).mul(branchFlat);
+    ).mul(branchFlat)
+      .mul(habitatAt(hf, s.sand, s.moisture).woodland)
+      .mul(Math.min(1, hf.mp.landscape.ecology.forest));
     const accept = stoneBase.add(branchW).min(1);
     If(cellHash(cell, sS ^ 0x71f1).greaterThanEqual(accept), () => {
       Return();

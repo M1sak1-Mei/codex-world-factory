@@ -25,5 +25,5 @@ for (const sp of TREE_SPECIES) {
   );
 }
 console.log(
-  `total ${Math.round(totalTris)} tris across 6 species, build ${totalMs.toFixed(0)}ms (×4 variants ≈ ${(totalMs * 4).toFixed(0)}ms)`,
+  `total ${Math.round(totalTris)} tris across ${TREE_SPECIES.length} species, build ${totalMs.toFixed(0)}ms (×4 variants ≈ ${(totalMs * 4).toFixed(0)}ms)`,
 );

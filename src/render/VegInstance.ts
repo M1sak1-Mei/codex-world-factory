@@ -69,6 +69,8 @@ export interface InstanceBinding {
   /** offset of this draw's region in the compact list */
   groupBase: number;
   fade?: RingFade | null;
+  /** R1 fades in only when this tree actually received a Hero slot. */
+  heroSelected?: StorageBufferNode<'uint'>;
   /** per-instance tint strength (0 disables) */
   tint?: number;
   /**
@@ -128,13 +130,14 @@ export function applyDitherFade(
   mat: MeshStandardNodeMaterial,
   dist: NF,
   fade: RingFade,
+  fadeInEnabled: NF = float(1),
 ): void {
   const ign = interleavedGradientNoise(screenCoordinate.xy);
   let draw: NB | null = null;
   if (fade.fadeInAt !== undefined) {
     const b = fade.inBand ?? fade.band;
     const fIn = varying(
-      smoothstep(fade.fadeInAt - b, fade.fadeInAt + b, dist),
+      mix(float(1), smoothstep(fade.fadeInAt - b, fade.fadeInAt + b, dist), fadeInEnabled),
     );
     draw = ign.greaterThanEqual(float(1).sub(fIn));
   }
@@ -230,7 +233,10 @@ export function instanceVeg(
 
   const f = bind.fade;
   if (f && (f.fadeInAt !== undefined || f.fadeOutAt !== undefined)) {
-    applyDitherFade(mat, dist, f);
+    const selected = bind.heroSelected
+      ? float(bind.heroSelected.element(slot))
+      : float(1);
+    applyDitherFade(mat, dist, f, selected);
   }
   applyInstanceTint(mat, slot, bind.tint ?? 0.12);
 

@@ -78,7 +78,7 @@ export class Hud {
     const c = this.engine.camera.position;
     const fmt = (n: number): string => n.toLocaleString('en-US');
     const lines: string[] = [
-      `CODEX  seed=${this.params.seed} terrain=${this.params.terrainRecipe} landscape=${this.params.landscapeProfile} world=${this.params.worldRecipe} scene=${this.params.scene} T=${this.params.timeOfDay}`,
+      `CODEX  seed=${this.params.seed} terrain=${this.params.terrainRecipe} landscape=${this.params.landscapeProfile} season=${this.params.season} world=${this.params.worldRecipe} scene=${this.params.scene} T=${this.params.timeOfDay}`,
       `${s.fps.toFixed(0)} fps  ${s.frameMs.toFixed(2)} ms (p95 ${s.frameMsP95.toFixed(2)})`,
       `draws ${fmt(s.drawCalls)}  tris ${fmt(s.triangles)}`,
       `gpu render ${s.gpuPasses['render']?.toFixed(2) ?? '–'} ms  compute ${s.gpuPasses['compute']?.toFixed(2) ?? '–'} ms`,

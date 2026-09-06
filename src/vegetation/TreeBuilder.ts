@@ -11,8 +11,12 @@ import type { Rng } from '../core/Seed';
 import { buildFoliageCards } from './FoliageCards';
 import { buildLeafCluster, buildSprayAt } from './LeafMesh';
 import { growSkeleton } from './Skeleton';
-import { MeshGrower, tubesForSkeleton } from './TubeMesh';
+import { heroBarkDefects, heroRoots, MeshGrower, tubesForSkeleton } from './TubeMesh';
 import type { GrowthInstance, Skeleton, SpeciesParams } from './VegTypes';
+import {
+  vegetationSurfaceProfile,
+  type VegetationSurfaceProfile,
+} from './VegetationProfiles';
 
 export interface BuiltTree {
   bark: BufferGeometry;
@@ -43,10 +47,21 @@ export function buildTree(
     foliageMode?: 'cards' | 'mesh' | 'hybrid';
     /** budgets the lod-0 hero down from gallery scale (~1.2M) to a ring cost */
     hero?: HeroDiet;
+    /** override the species' default surface contract (tools/tests). */
+    surface?: VegetationSurfaceProfile;
+    /** false builds a legacy/control LOD0 from the same skeleton. */
+    heroSurface?: boolean;
   },
 ): BuiltTree {
   const lod = opts?.lod ?? 0;
   const skel = growSkeleton(sp, rng, opts?.inst);
+  const surface = opts?.surface ?? vegetationSurfaceProfile(sp.id);
+  const heroSurface = lod === 0 && surface.hero.enabled && (opts?.heroSurface ?? true);
+  // Reserve named streams unconditionally so enabling richer surfaces never
+  // shifts foliage or any later consumer for the same tree seed.
+  const tubeRng = rng.fork('tubes');
+  const rootRng = rng.fork('heroRoots');
+  const defectRng = rng.fork('heroDefects');
 
   // ---- bark/tubes ------------------------------------------------------------
   // Ring LODs stop the tube hierarchy BELOW the anchor level — the card
@@ -57,13 +72,25 @@ export function buildTree(
   const lodK = lod === 0 ? (opts?.hero?.barkK ?? 1) : lod === 1 ? 0.6 : 0.32;
   const maxLevel =
     lod === 0 ? 99 : lod === 1 ? Math.max(1, anchorLevel - 1) : Math.max(1, anchorLevel - 2);
-  tubesForSkeleton(barkG, skel, rng.fork('tubes'), {
+  tubesForSkeleton(barkG, skel, tubeRng, {
     lodK,
     uRepeats: sp.barkRepeats,
     flare: { ...sp.flare, phase: rng.float() * Math.PI * 2 },
     maxLevel,
     branchStride: lod === 2 ? 2 : 1,
+    ...(heroSurface ? { surface: surface.hero.bark } : {}),
   });
+  if (heroSurface) {
+    heroRoots(
+      barkG,
+      skel,
+      rootRng,
+      surface.hero.roots,
+      surface.hero.bark,
+      sp.barkRepeats,
+    );
+    heroBarkDefects(barkG, skel, defectRng, surface.hero.defects);
+  }
   const barkTris = barkG.triCount;
   const bark = barkG.build();
 
@@ -111,13 +138,30 @@ export function buildTree(
         fol.kind === 'needleSpray'
           ? { ...fol.leaf, needleCount: Math.round(fol.leaf.needleCount * 3), len: fol.leaf.len * 1.15 }
           : fol.leaf;
-      const meshTarget = opts?.hero?.meshAnchorTarget ?? Infinity;
+      const meshTarget = opts?.hero?.meshAnchorTarget ?? (
+        heroSurface ? surface.hero.leaf.meshAnchorTarget : Infinity
+      );
       const mStride = Math.max(1, Math.ceil(skel.anchors.length / meshTarget));
       const meshAnchors =
         mStride > 1 ? skel.anchors.filter((_, i) => i % mStride === 0) : skel.anchors;
       for (const anchor of meshAnchors) {
-        if (fol.kind === 'needleSpray') buildSprayAt(folG, anchor, heroLeaf, folRng);
-        else buildLeafCluster(folG, anchor, fol.leaf, fol.clusterSize, folRng);
+        if (fol.kind === 'needleSpray') {
+          buildSprayAt(
+            folG,
+            anchor,
+            heroLeaf,
+            folRng,
+            heroSurface ? surface.hero.leaf : undefined,
+          );
+        }
+        else buildLeafCluster(
+          folG,
+          anchor,
+          fol.leaf,
+          fol.clusterSize,
+          folRng,
+          heroSurface ? surface.hero.leaf : undefined,
+        );
       }
       folG.bendNormals(crownC, crownR, fol.normalBend);
       folG.crownAO(crownC, crownR, 0.55);

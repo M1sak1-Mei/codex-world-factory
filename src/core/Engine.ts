@@ -6,12 +6,13 @@
 
 import { ACESFilmicToneMapping, PerspectiveCamera, Scene } from 'three';
 import { TimestampQuery, WebGPURenderer } from 'three/webgpu';
-import { buildRequiredLimits } from './Diagnostics';
+import { buildRequiredLimits, WORLD_MIN_SAMPLED_TEXTURES, WORLD_MIN_STORAGE_BUFFERS } from './Diagnostics';
 import { installMaterialKeyMemo } from '../render/ThreePatches';
 import { installPositionInvariance } from '../render/VegPrepass';
 import { GpuProfiler } from './GpuProfiler';
 import type { EngineStats, LaasHooks } from './Hooks';
 import type { LaasParams } from './Params';
+import { CAMERA_FAR, CAMERA_NEAR } from './CameraTuning';
 
 export type UpdateFn = (dt: number, worldTime: number) => void;
 
@@ -51,8 +52,8 @@ export class Engine {
     this.camera = new PerspectiveCamera(
       55,
       window.innerWidth / window.innerHeight,
-      0.3,
-      30000,
+      CAMERA_NEAR,
+      CAMERA_FAR,
     );
     this.camera.position.set(0, 10, 30);
     this.stats = {
@@ -78,6 +79,18 @@ export class Engine {
     // fail-loud: surface WebGPU validation errors (otherwise: silent black frames)
     const device = (renderer.backend as unknown as { device?: GPUDevice }).device;
     if (device) {
+      if (device.limits.maxStorageBuffersPerShaderStage < WORLD_MIN_STORAGE_BUFFERS) {
+        throw new Error(`World vegetation requires ${WORLD_MIN_STORAGE_BUFFERS} storage buffers per shader stage`);
+      }
+      const sampledTextureLimit = device.limits.maxSampledTexturesPerShaderStage;
+      if (sampledTextureLimit < WORLD_MIN_SAMPLED_TEXTURES) {
+        throw new Error(
+          `WebGPU device exposes ${sampledTextureLimit} sampled textures per shader stage; ` +
+          `the world renderer needs ${WORLD_MIN_SAMPLED_TEXTURES}`,
+        );
+      }
+      // eslint-disable-next-line no-console
+      console.log(`[laas] device sampled-texture limit=${sampledTextureLimit}`);
       let reported = 0;
       device.onuncapturederror = (e: GPUUncapturedErrorEvent): void => {
         if (reported++ < 8) {

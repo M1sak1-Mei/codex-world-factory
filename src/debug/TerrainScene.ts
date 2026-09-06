@@ -16,6 +16,7 @@ import { addScatterDebug } from './ScatterDebug';
 import { Forests } from '../vegetation/Forests';
 import { GroundRing } from '../vegetation/GroundRing';
 import { buildVegLibrary } from '../vegetation/VegLibrary';
+import { treeSeasonCoverages } from '../vegetation/Seasons';
 import { CausticsBake, setCausticContext } from '../render/Caustics';
 import { setWindContext, windU } from '../render/Wind';
 import { sunU, updateSunUniforms } from '../render/VegMaterials';
@@ -30,6 +31,7 @@ import { Clouds } from '../sky/Clouds';
 import { SunSky } from '../sky/SunSky';
 import { createDefaultWorldFeatureRegistry } from '../generation/DefaultWorldFeatures';
 import { heightfieldTerrainSurface } from '../generation/integrations/HeightfieldTerrainSurface';
+import { buildPavedRoadSurfaces } from '../generation/libraries/paved-roads/runtime/PavedRoadSurfaceRenderer';
 import { WORLD_HALF } from '../world/WorldConst';
 import { buildHorizontalCollisionProbe } from '../core/Collision';
 import { worldRecipe } from '../generation/core/WorldRecipe';
@@ -67,6 +69,18 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
     seed,
     worldHalf: WORLD_HALF,
   });
+  const defaultWalkSpawn = findWalkSpawn(hf);
+  const scatterExclusions = [
+    ...featurePlan.exclusions,
+    {
+      id: 'system/default-walk-spawn',
+      center: [defaultWalkSpawn.x, defaultWalkSpawn.z] as const,
+      treeRadius: 14,
+      understoryRadius: 9,
+      extrasRadius: 7,
+      stonesRadius: 3,
+    },
+  ];
 
   // physical sky first: probe gathering needs the atmosphere LUTs.
   // ?shot=N boots straight into a composed bookmark — use ITS time of day
@@ -85,9 +99,13 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
   // before tiles (under-crown ambient)
   ctx.progress(0.94, 'vegetation: scattering instances');
   const scatter = await runScatter(engine.renderer, hf, seed, {
-    exclusions: featurePlan.exclusions,
+    exclusions: scatterExclusions,
   });
-  const canopyTex = await buildCanopyMap(engine.renderer, scatter.trees);
+  const canopyTex = await buildCanopyMap(
+    engine.renderer,
+    scatter.trees,
+    treeSeasonCoverages(params.season),
+  );
   engine.stats.counters['veg.trees'] = scatter.trees.count;
   engine.stats.counters['veg.under'] = scatter.understory.count;
   engine.stats.counters['veg.extras'] = scatter.extras.count;
@@ -171,6 +189,17 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
     });
   }
 
+  if (
+    view === null &&
+    hf.mp.landscape.surfaces.layout === 'paved-network' &&
+    !ablate.has('paving')
+  ) {
+    const paving = buildPavedRoadSurfaces(hf.mp.surfaceLayout, terrainSurface);
+    engine.scene.add(paving);
+    engine.stats.counters['paving.paths'] = hf.mp.surfaceLayout.paths.length;
+    engine.stats.counters['paving.pads'] = hf.mp.surfaceLayout.pads.length;
+  }
+
   // Phase 6: stream/lake water clipmap (?ablate=water to A/B)
   if (view !== 'split' && !ablate.has('water')) {
     const water = new WaterSurface(
@@ -186,8 +215,11 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
   // Phase 5: variant pools + GPU cull → compacted indirect draws
   let forestsRef: Forests | null = null;
   if (view !== 'scatter' && !ablate.has('veg')) {
-    const lib = await buildVegLibrary(engine.renderer, seed, (p, m) =>
-      ctx.progress(0.963 + p * 0.006, m),
+    const lib = await buildVegLibrary(
+      engine.renderer,
+      seed,
+      (p, m) => ctx.progress(0.963 + p * 0.006, m),
+      params.season,
     );
     const forests = new Forests(
       hf,
@@ -212,7 +244,7 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
         canopyTex,
         seed,
         ablate.has('gi') ? null : gi,
-        featurePlan.exclusions,
+        scatterExclusions,
       );
       ring.init(lib.atlases.get('beech') ?? null);
       engine.scene.add(ring.group);
@@ -224,7 +256,7 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
 
     // far forests: aggregate canopy shell beyond the impostor mid-band
     if (!ablate.has('shell')) {
-      engine.scene.add(buildCanopyShell(hf, canopyTex));
+      engine.scene.add(buildCanopyShell(hf, canopyTex, params.season));
     }
   }
 
@@ -324,7 +356,7 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
         ctx.hooks.initialPoseMode = featureSpawn.mode;
         engine.camera.position.set(...featureSpawn.position);
       } else {
-        const spawn = findWalkSpawn(hf);
+        const spawn = defaultWalkSpawn;
         ctx.hooks.initialPose = {
           p: [spawn.x, hf.heightAtCpu(spawn.x, spawn.z) + 1.7, spawn.z],
           yaw: -0.78, // face NE — the serrated massif anchors the first frame
@@ -348,19 +380,63 @@ export async function buildTerrainScene(ctx: WorldContext): Promise<void> {
  * central-difference slope under ~19°).
  */
 function findWalkSpawn(hf: Heightfield): { x: number; z: number } {
-  for (let r = 0; r <= 240; r += 12) {
-    const steps = Math.max(1, Math.round((2 * Math.PI * r) / 18));
+  let driestFallback: { x: number; z: number; slope: number } | null = null;
+  const inspect = (x: number, z: number): { x: number; z: number; slope: number } | null => {
+    // A dry point right on a lake bank still opens with a transparent water
+    // sheet across most of the view. Require a small dry neighbourhood.
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      const px = x + Math.cos(a) * 240;
+      const pz = z + Math.sin(a) * 240;
+      if (hf.waterYAtCpu(px, pz) > hf.heightAtCpu(px, pz) - 0.12) return null;
+    }
+    const h = hf.heightAtCpu(x, z);
+    if (hf.waterYAtCpu(x, z) > h - 0.12) return null;
+    const sx = hf.heightAtCpu(x + 6, z) - hf.heightAtCpu(x - 6, z);
+    const sz = hf.heightAtCpu(x, z + 6) - hf.heightAtCpu(x, z - 6);
+    return { x, z, slope: Math.hypot(sx, sz) / 12 };
+  };
+
+  // Artificial pads already suppress trees, bushes, grass and micro relief.
+  // Prefer one when present so controllable/settled recipes open on a clear,
+  // legible surface instead of inside procedurally scattered foliage.
+  for (const pad of hf.mp.surfaceLayout.pads) {
+    const candidate = inspect(pad.center[0], pad.center[1]);
+    if (candidate === null) continue;
+    if (driestFallback === null || candidate.slope < driestFallback.slope) {
+      driestFallback = candidate;
+    }
+    if (candidate.slope <= 0.35) return candidate;
+  }
+
+  const pathPoints = hf.mp.surfaceLayout.paths
+    .flatMap((path) => path.points)
+    .sort((a, b) => Math.hypot(a[0], a[1]) - Math.hypot(b[0], b[1]));
+  for (const point of pathPoints) {
+    const candidate = inspect(point[0], point[1]);
+    if (candidate === null) continue;
+    if (driestFallback === null || candidate.slope < driestFallback.slope) {
+      driestFallback = candidate;
+    }
+    if (candidate.slope <= 0.35) return candidate;
+  }
+
+  // Basin recipes can flood their central few hundred metres. Search through
+  // the basin rim, and retain a dry fallback instead of returning wet (0, 0).
+  for (let r = 0; r <= 1400; r += 20) {
+    const steps = Math.max(1, Math.round((2 * Math.PI * r) / 24));
     for (let k = 0; k < steps; k++) {
       const a = (k / steps) * Math.PI * 2;
       const x = Math.cos(a) * r;
       const z = Math.sin(a) * r;
-      const h = hf.heightAtCpu(x, z);
-      if (hf.waterYAtCpu(x, z) > h - 0.05) continue; // wet or waterline
-      const sx = hf.heightAtCpu(x + 6, z) - hf.heightAtCpu(x - 6, z);
-      const sz = hf.heightAtCpu(x, z + 6) - hf.heightAtCpu(x, z - 6);
-      if (Math.hypot(sx, sz) / 12 > 0.35) continue; // too steep
-      return { x, z };
+      const candidate = inspect(x, z);
+      if (candidate === null) continue;
+      if (driestFallback === null || candidate.slope < driestFallback.slope) {
+        driestFallback = candidate;
+      }
+      if (candidate.slope > 0.35) continue; // too steep
+      return candidate;
     }
   }
-  return { x: 0, z: 0 };
+  return driestFallback ?? { x: 0, z: 0 };
 }

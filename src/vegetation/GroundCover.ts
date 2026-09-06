@@ -20,8 +20,8 @@ import {
   type Texture,
   Vector3,
 } from 'three';
-import { MeshStandardNodeMaterial } from 'three/webgpu';
-import { attribute, float, mix, smoothstep, texture, uv, vec3 } from 'three/tsl';
+import { MeshPhysicalNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu';
+import { attribute, bumpMap, float, mix, smoothstep, texture, uv, vec3 } from 'three/tsl';
 import type { Rng } from '../core/Seed';
 import type { NF, NV3, NV4 } from '../gpu/TSLTypes';
 import { applyCaustics } from '../render/Caustics';
@@ -29,7 +29,7 @@ import { grassTranslucency } from '../render/VegMaterials';
 import { MeshGrower } from './TubeMesh';
 
 /** single grass blade: tapered 4-segment strip with a built-in bend */
-export function grassBladeGeometry(SEG = 4): BufferGeometry {
+export function grassBladeGeometry(SEG = 6): BufferGeometry {
   const pos: number[] = [];
   const nrm: number[] = [];
   const uvA: number[] = [];
@@ -71,7 +71,10 @@ export function grassBladeGeometry(SEG = 4): BufferGeometry {
 }
 
 export function grassMaterial(): MeshStandardNodeMaterial {
-  const mat = new MeshStandardNodeMaterial();
+  const mat = new MeshPhysicalNodeMaterial();
+  mat.specularIntensity = 0.3;
+  mat.clearcoat = 0.035;
+  mat.clearcoatRoughness = 0.64;
   const id = attribute('idata', 'vec4') as unknown as NV4;
   const t = uv().y as unknown as NF;
   const fresh = mix(
@@ -88,6 +91,10 @@ export function grassMaterial(): MeshStandardNodeMaterial {
   albedo = albedo.mul(id.x.mul(0.16).add(1)) as unknown as NV3;
   mat.colorNode = albedo;
   mat.emissiveNode = grassTranslucency(albedo, t);
+  const bladeU = uv().x;
+  const centerRib = smoothstep(0.12, 0.01, bladeU.sub(0.5).abs());
+  const longitudinalGrain = bladeU.mul(31).add(t.mul(7)).sin().mul(0.08);
+  mat.normalNode = bumpMap(centerRib.mul(0.7).add(longitudinalGrain), float(0.15));
   // fake self-shadowing at the base
   mat.aoNode = smoothstep(0.0, 0.55, t).mul(0.55).add(0.45);
   mat.roughness = 0.88;
@@ -156,10 +163,10 @@ export function grassPatch(
 // Debris
 // ---------------------------------------------------------------------------
 
-/** bent twig: 4-sided micro tube, 2 kinks */
+/** Bent twig/branch source: rounded hexagonal section, four short bends. */
 export function twigGeometry(rng: Rng): BufferGeometry {
   const g = new MeshGrower();
-  const segs = 3;
+  const segs = 5;
   const pts: Vector3[] = [];
   const dir = new Vector3(1, 0.08 + rng.float() * 0.1, (rng.float() - 0.5) * 0.4).normalize();
   const p = new Vector3(0, 0.012, 0);
@@ -179,7 +186,7 @@ export function twigGeometry(rng: Rng): BufferGeometry {
   );
   // reuse tube path via a minimal inline branch
   const hue = rng.float() * 2 - 1;
-  const ring = 4;
+  const ring = 6;
   const rings: number[][] = [];
   const N = new Vector3();
   const B = new Vector3();
@@ -263,10 +270,15 @@ export function barkChipGeometry(rng: Rng): BufferGeometry {
 }
 
 export function debrisMaterial(kind: 'twig' | 'chip'): MeshStandardNodeMaterial {
-  const mat = new MeshStandardNodeMaterial();
+  const mat = new MeshPhysicalNodeMaterial();
+  mat.specularIntensity = 0.25;
   const d = attribute('vdata', 'vec4') as unknown as NV4;
   const base = kind === 'twig' ? vec3(0.1, 0.075, 0.05) : vec3(0.085, 0.06, 0.04);
   mat.colorNode = base.mul(d.x.mul(0.2).add(1)).mul(d.w);
+  const duv = uv();
+  const grain = duv.y.mul(kind === 'twig' ? 45 : 28)
+    .add(duv.x.mul(kind === 'twig' ? 9 : 21)).sin();
+  mat.normalNode = bumpMap(grain, float(kind === 'twig' ? 0.12 : 0.2));
   applyCaustics(mat); // twigs settle in streambeds
   mat.roughness = 0.95;
   mat.metalness = 0;
@@ -276,7 +288,8 @@ export function debrisMaterial(kind: 'twig' | 'chip'): MeshStandardNodeMaterial 
 
 /** dry leaf-litter card material: reuses a foliage atlas, browned */
 export function litterMaterial(atlas: Texture): MeshStandardNodeMaterial {
-  const mat = new MeshStandardNodeMaterial();
+  const mat = new MeshPhysicalNodeMaterial();
+  mat.specularIntensity = 0.24;
   const t = texture(atlas, uv() as never) as unknown as NV4;
   const albedo = t.rgb.mul(t.rgb);
   // shift green leaf clusters toward dry browns
@@ -286,6 +299,12 @@ export function litterMaterial(atlas: Texture): MeshStandardNodeMaterial {
     float(0.5),
   );
   mat.colorNode = browned;
+  const luv = uv();
+  const litterMidrib = smoothstep(0.08, 0.008, luv.x.sub(0.5).abs());
+  const litterVeins = float(1).sub(
+    luv.y.mul(46).add(luv.x.sub(0.5).abs().mul(19)).sin().abs(),
+  ).pow(7).mul(0.28);
+  mat.normalNode = bumpMap(litterMidrib.add(litterVeins), float(0.12));
   applyCaustics(mat); // drowned litter in stream margins
   mat.opacityNode = t.w;
   mat.alphaTest = 0.32;
